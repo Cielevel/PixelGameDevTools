@@ -1,14 +1,15 @@
-"""sprites 子目录布局约定 —— 资产名前缀决定其子目录（2026-09-03 整理定案）。
+"""sprites 子目录布局约定 —— 资产名前缀决定其子目录。
 
-与 docs/美术清单.md 章节一一对应：
-  player/  玩家（player_*，64×64；2026-09-05 player1 转设 NPC 后暂空置，待重新立项）
-  npc/     NPC（npc_*，64×64）
-  mob/     敌人（mob_*，小怪 32×32 / 精英 32×48 / Boss 64×64）
+PREFIX_DIRS 为典型像素游戏的通用起步默认，按目标工程的资产清单修订
+（映射与尺寸档位以工作区 AGENTS.md 为准，见仓库 README「适配清单」）：
+  player/  玩家（player_*）
+  npc/     NPC（npc_*）
+  mob/     敌人（mob_*）
   bullet/  武器与弹体（proj_* / wpn_* / ebullet_*）
   fx/      特效（fx_*）
   pickup/  拾取（pick_*）
-  icon/    UI 图标（icon_*，32×32）
-  base/    风格基准资产（不在清单，如 slime_idle）
+  icon/    UI 图标（icon_*）
+  base/    风格基准资产（清单外，如 slime_idle）
 新增资产按前缀自动归位；前缀匹配不到时落 base/ 并在交付说明中提示主代理确认。
 """
 from __future__ import annotations

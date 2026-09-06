@@ -2,7 +2,7 @@
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8">
-<title>深潮幸存者 · 场景预览台</title>
+<title>场景预览台 · Scene Previewer</title>
 <style>
   body { background:#14151f; color:#a1a3c0; font:13px/1.6 system-ui,sans-serif; margin:0; padding:16px; }
   h1 { font-size:15px; color:#dfd9c3; margin:0 0 8px; font-weight:600; }
@@ -17,7 +17,7 @@
 </style>
 </head>
 <body>
-<h1>深潮幸存者 · 场景预览台</h1>
+<h1>场景预览台 · Scene Previewer</h1>
 <div id="bar">
   <button id="minus">−</button><span id="zoom">1×</span><button id="plus">＋</button>
   <button id="fit">适应窗口</button>
@@ -28,29 +28,28 @@
 <p class="hint">用途：素材在游戏内比例/观感的正式视检环境（避免"放大看"认知偏差）。支持静态贴图与分层帧动画（本体帧+花层帧同钟逐帧合成）；新增素材只改本文件底部 SCENE 数据；缩放只取整数倍（最近邻，禁平滑）。</p>
 <script>
 'use strict';
-// ════ 场景数据（唯一需要编辑的地方）════════════════════════════
-// 约定：canvas 逻辑分辨率 = 游戏参考分辨率口径（640×360 暂定，本场景 20×11 格整除取 640×352）；
+// ════ 场景数据（唯一需要编辑的地方）══════════════════════════
+// 以下为最小示例（指向不存在的资产时状态栏显示"加载失败"，属正常——把路径换成目标工程资产即可）。
+// 约定：canvas 逻辑分辨率 = 游戏参考分辨率口径（tile 32px 需整除画布宽高）；
 //       tilesets 字符 → 32×32 单帧 sheet；map 每字符一格；
 //       sprite 的 x = 水平中心、y = 脚底所踏地面线（图片底边对齐该线）；
-//       动画精灵 frames = 帧序列，每帧为"层列表"（自下而上 alpha 叠加，如 [本体帧, 花层帧]），
+//       动画精灵 frames = 帧序列，每帧为"层列表"（自下而上 alpha 叠加，如 [本体帧, 配件帧]），
 //       单一时钟按 fps 推进帧号——分层动画的分层数据在此合成播放。
 const P  = '../../assets/sprites/player/';
-const N  = '../../assets/sprites/npc/';
 const seq = (prefix, n) => [...Array(n)].map((_, i) => P + prefix + '_' + String(i).padStart(2, '0') + '.png');
 const zip = (a, b) => a.map((s, i) => [s, b[i]]);
 
-const IDLE = seq('player_ch_idle_s', 10), WALK = seq('player_ch_walk_s', 6);
+// 示例：本体帧 + 配件帧 同钟合成（换成你的帧前缀与帧数）
+const IDLE = seq('hero_idle', 6), ACC = seq('hero_acc_aura_idle', 6);
 
 const SCENE = {
   canvas: { w: 640, h: 352 },
   tilesets: {
-    '.': '../../assets/tiles/tile_floor_0_sheet.png',
-    'T': '../../assets/tiles/tile_wall_top_sheet.png',
-    'F': '../../assets/tiles/tile_wall_face_sheet.png',
+    '.': '../../assets/tiles/floor_sheet.png',   // 字符 → 32×32 单帧 sheet
   },
   map: [
-    'TTTTTTTTTTTTTTTTTTTT',
-    'FFFFFFFFFFFFFFFFFFFF',
+    '....................',
+    '....................',
     '....................',
     '....................',
     '....................',
@@ -62,13 +61,10 @@ const SCENE = {
     '....................',
   ],
   sprites: [
-    // ── 静态 NPC（比例参照）──
-    { name: 'npc_masked_youth_idle_s_00', src: N + 'npc_masked_youth_idle_s_00.png', x: 150, y: 246 },
-    // ── player_ch 分层角色：本体帧 + 花层帧 同钟合成 ──
-    { name: 'player_ch+origin (idle 8fps)',       frames: zip(IDLE, seq('player_ch_acc_origin_idle_s', 10)),       fps: 8,  x: 214, y: 258 },
-    { name: 'player_ch+green_bubble (idle 8fps)', frames: zip(IDLE, seq('player_ch_acc_green_bubble_idle_s', 10)), fps: 8,  x: 276, y: 258 },
-    { name: 'player_ch+ice (walk 10fps)',         frames: zip(WALK, seq('player_ch_acc_ice_walk_s', 6)),           fps: 10, x: 338, y: 262 },
-    { name: 'player_ch+sun (walk 10fps)',         frames: zip(WALK, seq('player_ch_acc_sun_walk_s', 6)),           fps: 10, x: 400, y: 262 },
+    // ── 静态贴图（比例参照）──
+    { name: 'static 示例', src: P + 'npc_static_00.png', x: 150, y: 246 },
+    // ── 分层帧动画：本体帧 + 配件帧 同钟合成 ──
+    { name: 'hero+acc (idle 8fps)', frames: zip(IDLE, ACC), fps: 8, x: 276, y: 258 },
   ],
 };
 

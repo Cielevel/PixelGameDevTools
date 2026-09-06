@@ -1,17 +1,17 @@
 ---
 name: pixcli
-description: 深潮幸存者像素美术工具链（pixcli）速查与门禁判读。凡涉及像素资产的检查/验收、序列帧动画复核、sprite sheet 拼切、调色板量化归板、像素级 diff 零差异验证、预览导出，或接线消费 assets/sprites 资产时使用——即使用户没有明说"pixcli"。
+description: 像素美术工具链（pixcli）速查与门禁判读。凡涉及像素资产的检查/验收、序列帧动画复核、sprite sheet 拼切、调色板量化归板、像素级 diff 零差异验证、预览导出，或接线消费 assets/sprites 资产时使用——即使用户没有明说"pixcli"。
 ---
 
 # pixcli 像素美术工具链速查
 
-`tools/pixelart/pixcli.py` 是本工程像素资产的唯一 CLI（Python 3 + Pillow，无其他依赖），仓库根目录直接运行，无需安装：
+`tools/pixelart/pixcli.py` 是工作区像素资产的唯一 CLI（Python 3 + Pillow，无其他依赖），仓库根目录直接运行，无需安装：
 
 ```bash
 python tools/pixelart/pixcli.py <子命令> ...
 ```
 
-**跨平台**：本工程经 GitHub 在 Windows / macOS 间同步。解释器名二选一——macOS/Linux 用 `python3`，Windows 用 `python`；依赖安装 `python3 -m pip install Pillow`；示例临时目录 `/tmp` 在 Windows Git Bash 下自动转换为系统临时目录；Windows 管道重定向若遇中文编码报错，设 `PYTHONUTF8=1`。
+**跨平台**：解释器名二选一——macOS/Linux 用 `python3`，Windows 用 `python`；依赖安装 `python3 -m pip install Pillow`；示例临时目录 `/tmp` 在 Windows Git Bash 下自动转换为系统临时目录；Windows 管道重定向若遇中文编码报错，设 `PYTHONUTF8=1`。
 
 本 skill 只管「怎么跑工具、怎么判读结果」。资产基准（尺寸档位/命名/目录）以工作区 `AGENTS.md` 为准；完整参数文档在 `tools/pixelart/README.md`。制作与审查走 pixel-artist / pixel-reviewer 派发；**主代理自查、派发后复核、接线时验证**用这里。
 
@@ -19,12 +19,12 @@ python tools/pixelart/pixcli.py <子命令> ...
 
 - **交付门禁只有一条**：`pixcli check ...` exit 0。exit 1 = 存在 P0/P1 必须修；P2 只是提示不拦截。
 - check 查：尺寸（`--size WxH`）、RGBA 模式、alpha 两态（0/255）、唯一色数 ≤16（`--max-colors`）、色板合规（`--palette assets/palettes/<名>.json`）、帧组脚底与水平中心对齐、动画一致性、孤立像素、连通域计数（`[图]` 行 `域N`）。
-- **帧组自动聚合**（2026-09-03 起）：按文件名 stem 前缀分组（`slime_idle_00..07` → 一组，`_sheet` 自成一组），**整目录混检各资产互不误报**；`[帧组 <名>]` 行出帧组级问题。关掉帧组检查仍用 `--no-frames --no-anim`。
-- **动画一致性**（多帧组自动启用，2026-09-03 起）：
+- **帧组自动聚合**：按文件名 stem 前缀分组（`slime_idle_00..07` → 一组，`_sheet` 自成一组），**整目录混检各资产互不误报**；`[帧组 <名>]` 行出帧组级问题。关掉帧组检查仍用 `--no-frames --no-anim`。
+- **动画一致性**（多帧组自动启用）：
   - 死帧（相邻帧像素完全相同）→ P1 门禁：动画没动或重复导出。
   - 帧间跳变 / 循环首尾突断 → P2 提示：先目视再定性，不自动成立。
   - 面积/体积变化**不自动判级**：FX 类动画（爆发、扩散、雷击）面积剧变与高帧间 diff 属正常——用 `anim` 看数据再解读，不要按循环动画标准误杀。
-- **连通域**（2026-09-03 起）：域数默认只作信息；`--components-max N` 升级为 P1 门禁，用于「主体 1 + 碎影 N、碎影不与主体粘连」类资产——域数骤减即碎影与主体粘连。悬浮晶体、独立弹体等合法多域资产不要设此门禁。
+- **连通域**：域数默认只作信息；`--components-max N` 升级为 P1 门禁，用于「主体 1 + 碎影 N、碎影不与主体粘连」类资产——域数骤减即碎影与主体粘连。悬浮晶体、独立弹体等合法多域资产不要设此门禁。
 - `anim` 是纯统计命令，永远 exit 0，只出数据不下结论。
 
 ## 常用命令
@@ -68,4 +68,4 @@ python tools/pixelart/pixcli.py diff a.png b.png
 
 - 完整参数与生成脚本骨架：`tools/pixelart/README.md`
 - 风格基准库（明暗/剪影/眼神光惯例）：`tools/pixelart/style_kit.py`；各资产生成脚本 `tools/pixelart/gen_*.py`
-- 资产目录映射与清单：`tools/pixelart/layout.py`、`docs/美术清单.md`
+- 资产目录前缀映射：`tools/pixelart/layout.py`（按工作区清单修订）

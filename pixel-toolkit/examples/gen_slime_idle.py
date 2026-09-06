@@ -1,18 +1,18 @@
 #!/usr/bin/env python3
-"""史莱姆（小怪）idle 待机 10 帧生成脚本 —— 风格基准资产（2026-09-04 注册为正式 mob）。
+"""史莱姆（软体圆物）idle 待机 10 帧生成脚本 —— 生成脚本骨架范例（风格基准资产）。
 
-一源双产出：`assets/sprites/mob/mob_slime_idle_{00..09}.png` + sheet（正式资产，
-美术清单 §3，接替蚀鼠开局怪位）与 `assets/sprites/base/slime_idle_*`（风格基准
-存档，供 style_kit/风格复用模板引用），两份像素完全相同。
+演示要点：颜色先入调色板再使用、一源双产出（正式档 <类别>_slime_idle 经 layout.py
+前缀映射落 mob/，基准存档 slime_idle 落 base/，两份像素完全相同）、脚本可复现
+（重跑 = 资产，配合 pixcli diff 做零差异验证）。输出路径按目标工程调整。
 
-规范：32x32、RGBA、alpha 两态、像素密度 1 tile = 32px、光源左上、1px 闭合内描边。
+规范：32x32、RGBA、alpha 两态、光源左上、1px 闭合内描边。
 明暗/造型模型复用 tools/pixelart/style_kit.py（风格基准库）。
 动画：squash & stretch 呼吸/弹性循环（压扁蓄力 → 回弹拉伸 → 顶点 → 回落 →
 二次小压扁 → 回中），底边始终贴地（bbox bottom 恒为 y=31）、水平中心恒为 x=15.5，
 体积守恒（压扁变宽、拉伸变窄）。首尾帧相同保证无缝循环。
 
-可复现：python3 tools/pixelart/gen_slime_idle.py
-（调色板若缺失则先落盘 assets/palettes/slime.json，颜色先入板再使用）
+可复现：python3 pixel-toolkit/examples/gen_slime_idle.py
+（调色板若缺失则先落盘 assets/palettes/slime.json）
 """
 from __future__ import annotations
 

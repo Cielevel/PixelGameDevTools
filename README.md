@@ -1,46 +1,44 @@
-# PixelGameDevTools —— 像素游戏美术生产工具链（可复用资产包）
+# PixelGameDevTools —— 像素游戏工具/参考库（私有）
 
-> 2026-09-06 自 DeepTideSurvivors（深潮幸存者）工程抽离，落位为源工程同级目录的**独立复用资产仓库**；对应源版本 commit `146da45`（抽离时快照另存于源仓 git 历史 `61ed497` 的 `reusable/` 路径，可溯）。
-> 只含**项目无关**的代码、工具与方法论文档，**不含任何工程自产美术资产、调色板与 gen_* 生成脚本**（留在源工程本地仓库存档）；第三方模板资产包为用户购买所得，见 `asset-packs/`。
-> 文件内容与源工程保持一致未做删改，项目耦合点统一收在下方「适配清单」。
+> **定位：纯净的像素游戏美术工具与参考库**——只含项目无关的工具代码、通用流程与参考资料，不与任何具体游戏工程的内容耦合。私有仓：个人使用、不公开。
+> 2026-09-06 自 DeepTideSurvivors（深潮幸存者）工程抽离为独立仓库，抽离后已剥离全部源工程专属内容（基准档位/资产名/工程文档引用）。
 
 ## 构成
 
-| 目录 | 内容 | 来源 |
-|---|---|---|
-| `pixel-toolkit/` | pixcli 像素美术 CLI 与核心库（Python 3 + Pillow，唯一第三方依赖）：`canvas`（逐像素绘制基元，无抗锯齿）/ `palette`（调色板 JSON、量化归板、alpha 两态）/ `anim`（帧 IO、sprite sheet 拼切、GIF/自包含 HTML 播放器、洋葱皮检查图）/ `check`（程序化门禁：尺寸/alpha/色数/对齐/动画一致性/连通域）/ `layout`（sprites 子目录布局约定）/ `style_kit`（明暗与造型风格基准库）；`README.md` 为完整命令文档；`examples/gen_slime_idle.py` 为风格基准资产的完整生成脚本范例 | `tools/pixelart/` |
-| `scene-previewer/` | 场景预览台（纯静态单 HTML，双击即用）：tilemap + sprite 摆位、分层帧动画（本体层+配件层同钟合成）播放、整数倍最近邻缩放、踩格线——素材「游戏内比例实感」的正式视检环境，避免放大看图的认知偏差 | `tools/scene/scene.html` |
-| `agent-pipeline/` | ZCode 多 agent 像素美术流水线定义（8 个 agent）：artist/reviewer 效率版与全量版、loop-reviewer（循环动画专项）、imitator+reviewer（有源参考的模仿绘制）、quick（形象设计快稿）；外加 pixcli skill（工具速查与门禁判读） | `.zcode/agents/`、`.zcode/skills/pixcli/` |
-| `templates/` | `pixel-art-repro.yml`：GitHub Actions 资产可复现 workflow（重跑全部 gen 脚本 → 与在盘资产逐像素 diff → pixcli 结构门禁）；`gitattributes`：PNG/GIF 等一律 binary 防换行归一化误伤；`gitignore-pixel-game`：本类工程的 .gitignore 起步模板 | 源工程同名文件 |
-| `knowledge/` | 方法论与调研沉淀：`像素法则.md`（Saint11 教学方法提炼，**含版权口径说明**）、`参考图生成约束.md`、`即梦生图-Mac自动化手册.md`、`research/` 3 篇调研总结（像素画 agent 生态 / 工程分析与工作流 / 轻量像素工具）；另含 `saint11-tutorials/` 教程卡原图归档（81 件，2026-09-06 自源工程迁入，**.gitignore 不入库**、仅本机私有学习，红线见其 README） | `docs/` |
-| `asset-packs/` | 第三方模板资产包（**用户购买所得**，用户声明拥有使用权利；包内未随附许可文件，再分发边界以购买渠道条款为准）：`top-down-asset-pack/`（俯视 topdown 人形动作包，idle/walk/run/attack × 8 朝向，64×64/96×96 格）+ `2d-pixel-art-character-template/`（48×48 侧视动作模板包，备用参考）；模仿模式的动作源，规格与接线见其 README | 源工程 `assets/template/` |
+| 目录 | 内容 |
+|---|---|
+| `pixel-toolkit/` | pixcli 像素美术 CLI 与核心库（Python 3 + Pillow，唯一第三方依赖）：`canvas`（逐像素绘制基元，无抗锯齿）/ `palette`（调色板 JSON、量化归板、alpha 两态）/ `anim`（帧 IO、sprite sheet 拼切、GIF/自包含 HTML 播放器、洋葱皮检查图）/ `check`（程序化门禁：尺寸/alpha/色数/对齐/动画一致性/连通域）/ `layout`（sprites 子目录布局约定）/ `style_kit`（明暗与造型风格基准库）；`README.md` 为完整命令文档；`examples/gen_slime_idle.py` 为生成脚本骨架范例 |
+| `scene-previewer/` | 场景预览台（纯静态单 HTML，双击即用）：tilemap + sprite 摆位、分层帧动画（本体层+配件层同钟合成）播放、整数倍最近邻缩放、踩格线——素材「游戏内比例实感」的正式视检环境，避免放大看图的认知偏差；底部 SCENE 数据即接入点 |
+| `agent-pipeline/` | ZCode 多 agent 像素美术流水线（8 个 agent + shared 公共基线）：artist/reviewer 效率版与全量版、loop-reviewer（循环动画专项）、imitator+reviewer（有源参考的模仿绘制）、quick（形象设计快稿）；`shared/` 收拢共同约定（像素资产约定/技法纪律/审查框架），**agent 定义只含各自差量，改基准只改 AGENTS.md 一处**；外加 pixcli skill（工具速查与门禁判读） |
+| `asset-packs/` | 已购第三方模板资产包（只读参考，「借动作不借皮」的源库）：`top-down-asset-pack/`（俯视 64×64 格动作包，idle/walk/run/attack × 8 朝向）、`2d-pixel-art-character-template/`（48×48 侧视动作模板包）；规格与许可边界见包内 README |
+| `templates/` | `pixel-art-repro.yml`：GitHub Actions 资产可复现 workflow（重跑全部 gen 脚本 → 与在盘资产逐像素 diff → pixcli 结构门禁）；`gitattributes`：PNG/GIF 等一律 binary 防换行归一化误伤；`gitignore-pixel-game`：本类工程的 .gitignore 起步模板 |
+| `knowledge/` | 方法论与参考资料：《像素法则》（Saint11 教学方法提炼，**含版权口径说明**）、《参考图生成约束》（生图 AI → 像素转换管线）、《即梦生图-Mac自动化手册》（参考图机器通路）、`research/` 2 篇通用调研（像素画 agent 生态 / 轻量像素工具）；`saint11-tutorials/` 教程卡原图归档（80 张，随本仓 git 入库——**本仓私有不公开**，使用边界见其 README） |
 
-## 复用步骤（新工程）
+## 复用步骤（接入新游戏工程）
 
-1. 拷贝本目录到新工程（整个目录自包含，可整取或按需取子目录）：
+1. 拷贝工具链到新工程：
    - `pixel-toolkit/` → 新工程 `tools/pixelart/`
-   - `agent-pipeline/agents/` → 新工程 `.zcode/agents/`；`agent-pipeline/skills/pixcli/` → 新工程 `.zcode/skills/pixcli/`
-2. 按 `templates/` 落 `.gitattributes` / `.gitignore`；需要 CI 资产门禁时启用 `templates/pixel-art-repro.yml`
-3. 在新工程 `AGENTS.md` 里定基准（tile 像素密度 / 资产尺寸档位 / 视角与朝向 / 动画帧数指引）——这是 `layout.py` 子目录映射、各 agent 审查单与 CI 门禁的共同输入
-4. 过一遍下方「适配清单」，替换项目耦合点
+   - `agent-pipeline/agents/` → 新工程 `.zcode/agents/`；`agent-pipeline/shared/` → 新工程 `.zcode/agents/shared/`；`agent-pipeline/skills/pixcli/` → 新工程 `.zcode/skills/pixcli/`
+   - 方法论文档 `knowledge/像素法则.md`、`参考图生成约束.md`、`即梦生图-Mac自动化手册.md` → 新工程 `docs/`（agent 定义按 `docs/` 路径引用）
+2. 模板包按需取用：`asset-packs/` 所需包拷贝（或软链）到新工程 `assets/template/`，imitator 系 agent 从该路径取源
+3. 按 `templates/` 落 `.gitattributes` / `.gitignore`；需要 CI 资产门禁时启用 `templates/pixel-art-repro.yml`
+4. 在新工程 `AGENTS.md` 里定基准（tile 像素密度 / 尺寸档位 / 视角与朝向 / 帧数指引 / 调色板与目录 / 画面方向）——这是 shared 约定、`layout.py` 前缀映射、各 agent 审查单与 CI 门禁的**唯一基准输入；改基准只改 AGENTS.md 一处**
 5. 首个风格基准资产（建议从 slime 类软体圆物起步）定案后，把明暗造型参数沉淀进 `style_kit.py`，后续资产全部复用
 
 ## 适配清单（项目耦合点）
 
-- **路径约定**：工具链与文档默认相对仓库根运行，涉及 `tools/pixelart/`、`assets/sprites/`、`assets/palettes/`、`previews/`；路径变更需同步 `pixel-toolkit/README.md`、`agent-pipeline/skills/pixcli/SKILL.md`、`templates/pixel-art-repro.yml`
-- **`pixel-toolkit/layout.py`**：子目录划分（player/npc/mob/bullet/fx/pickup/icon/base）与名称前缀映射源自源工程 `docs/美术清单.md` 的章节结构；新工程清单结构不同则改其 docstring 与映射表
-- **措辞**：`SKILL.md` 及部分 agent 定义（pixel-quick 最多）含少量「深潮幸存者」字样与源工程目录引用（各文件 ≤5 处），全局替换即可
-- **`scene-previewer/scene.html`**：页面标题与底部 SCENE 数据（tileset/sprite 摆位、`../../assets/...` 相对路径）为源工程数据；播放器本体（整数倍缩放/踩格线/分层帧合成时钟）直接可用，「新增素材只改本文件底部 SCENE 数据」
+- **`pixel-toolkit/layout.py`**：前缀映射表（player/npc/mob/bullet/fx/pickup/icon/base）为通用起步默认，按新工程资产清单修订 docstring 与映射表
+- **`scene-previewer/scene.html`**：底部 SCENE 数据为最小示例占位（指向不存在的资产会显示加载失败），接入时替换为目标工程资产路径
+- **`pixel-toolkit/examples/gen_slime_idle.py`**：生成脚本骨架范例（调色板先入板、重跑=资产、一源双产出的写法示范），输出路径按新工程调整
 - **`templates/pixel-art-repro.yml`**：触发 paths 与 `assets/sprites/*/` 门禁循环按新工程目录调整
-- **`pixel-toolkit/examples/gen_slime_idle.py`**：输出路径写死源工程 `assets/sprites/mob/`、`assets/palettes/`；只作生成脚本骨架范例（一源双产出、调色板先入板、重跑=资产），不直接运行
-- **`agent-pipeline/agents/`**：内嵌的尺寸档位（64 玩家 / 32 小怪等）与帧数指引是源工程基准；新工程基准不同须修订——源工程实践：**改基准须同步全部 8 个 agent 定义**，保持与 AGENTS.md 一致
+- **`asset-packs/`**：第三方购买资产，对外再分发边界以购买渠道条款为准
 
 ## 红线与许可
 
-- 本包不含**工程自产**美术资产（sprites/tiles）、调色板 JSON、gen_* 生成脚本与参考图——均留在源工程本地仓库存档，不随本包分发；`asset-packs/` 第三方模板包为**用户购买所得**（用户声明拥有使用权利），随本包入库
-- 外部内容义务**不随本包转移**：源工程美术含 Penusbmic「cutest hero」忠实复刻系（署名义务随资产走，资产未入本包）；`knowledge/像素法则.md` 是对 Saint11（Pedro Medeiros）公开教学的方法论提炼转述，其版权口径见该文头部。**教程卡原图归档**存于 `knowledge/saint11-tutorials/` 但**已加入 .gitignore 不纳入 git**——git 追踪内容（即可外发部分）不含任何外部素材；归档仅本机私有学习、不得外发，红线见其 README，该文头部声明应保留
-- `knowledge/` 其余文档为调研与方法沉淀，无外部内容嵌入
+- 本仓为**私有参考库**：个人使用、不公开。`knowledge/saint11-tutorials/`（Saint11 教程卡原图，原站未标注开放许可）随仓入库的依据是私有学习用途；**转公开、推送公开远端或对外分发前，必须先移出该目录**——边界详见其 README
+- `asset-packs/` 为用户购买所得，拥有使用权利；原包不得对外再发布，成品游戏分发的是基于它重绘的工程自产资产
+- `knowledge/像素法则.md` 是对 Saint11（Pedro Medeiros）公开教学的方法论提炼转述（口径见该文头部）；本包不含任何具体游戏的美术资产、调色板 JSON 与正式 gen_* 脚本
 
 ## 与源工程的关系
 
-单向快照：源工程 DeepTideSurvivors 已转纯本地存档（远端解除关联，完整历史以 git bundle 快照备份，美术资产/gen 脚本/docs 全部原地保留）；本仓库位于其同级目录、自此独立版本演进，不再回写源工程。
+单向快照：2026-09-06 自 DeepTideSurvivors 抽离（对应源版本 commit `146da45`），抽离后已剥离全部源工程专属内容，本仓独立演进、不回写源工程；源工程已转纯本地存档（远端解除关联，完整历史以 git bundle 快照备份）。
