@@ -12,7 +12,7 @@
 | `scene-previewer/` | 场景预览台（纯静态单 HTML，双击即用）：tilemap + sprite 摆位、分层帧动画（本体层+配件层同钟合成）播放、整数倍最近邻缩放、踩格线——素材「游戏内比例实感」的正式视检环境，避免放大看图的认知偏差 | `tools/scene/scene.html` |
 | `agent-pipeline/` | ZCode 多 agent 像素美术流水线定义（8 个 agent）：artist/reviewer 效率版与全量版、loop-reviewer（循环动画专项）、imitator+reviewer（有源参考的模仿绘制）、quick（形象设计快稿）；外加 pixcli skill（工具速查与门禁判读） | `.zcode/agents/`、`.zcode/skills/pixcli/` |
 | `templates/` | `pixel-art-repro.yml`：GitHub Actions 资产可复现 workflow（重跑全部 gen 脚本 → 与在盘资产逐像素 diff → pixcli 结构门禁）；`gitattributes`：PNG/GIF 等一律 binary 防换行归一化误伤；`gitignore-pixel-game`：本类工程的 .gitignore 起步模板 | 源工程同名文件 |
-| `knowledge/` | 方法论与调研沉淀：`像素法则.md`（Saint11 教学方法提炼，**含版权口径说明**）、`参考图生成约束.md`、`即梦生图-Mac自动化手册.md`、`research/` 3 篇调研总结（像素画 agent 生态 / 工程分析与工作流 / 轻量像素工具） | `docs/` |
+| `knowledge/` | 方法论与调研沉淀：`像素法则.md`（Saint11 教学方法提炼，**含版权口径说明**）、`参考图生成约束.md`、`即梦生图-Mac自动化手册.md`、`research/` 3 篇调研总结（像素画 agent 生态 / 工程分析与工作流 / 轻量像素工具）；另含 `saint11-tutorials/` 教程卡原图归档（81 件，2026-09-06 自源工程迁入，**.gitignore 不入库**、仅本机私有学习，红线见其 README） | `docs/` |
 
 ## 复用步骤（新工程）
 
@@ -37,7 +37,7 @@
 ## 红线与许可
 
 - 本包**不含**美术资产、调色板 JSON、gen_* 生成脚本、第三方模板与参考图——均留在源工程本地仓库存档，不随本包分发
-- 外部内容义务**不随本包转移**：源工程美术含 Penusbmic「cutest hero」忠实复刻系（署名义务随资产走，资产未入本包）；`knowledge/像素法则.md` 是对 Saint11（Pedro Medeiros）公开教学的方法论提炼转述，其版权口径见该文头部——教程卡原图归档**不在本包**，转载本包不需附带授权但该文头部声明应保留
+- 外部内容义务**不随本包转移**：源工程美术含 Penusbmic「cutest hero」忠实复刻系（署名义务随资产走，资产未入本包）；`knowledge/像素法则.md` 是对 Saint11（Pedro Medeiros）公开教学的方法论提炼转述，其版权口径见该文头部。**教程卡原图归档**存于 `knowledge/saint11-tutorials/` 但**已加入 .gitignore 不纳入 git**——git 追踪内容（即可外发部分）不含任何外部素材；归档仅本机私有学习、不得外发，红线见其 README，该文头部声明应保留
 - `knowledge/` 其余文档为调研与方法沉淀，无外部内容嵌入
 
 ## 与源工程的关系

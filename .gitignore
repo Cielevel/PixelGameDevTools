@@ -1,2 +1,6 @@
 # macOS
 .DS_Store
+
+# Saint11 教程卡归档：仅本机私有学习，严禁入库/外发（红线见目录内 README；
+# 仓库转公开或推送远端无需处理本目录——git 中自始不存在）
+knowledge/saint11-tutorials/
