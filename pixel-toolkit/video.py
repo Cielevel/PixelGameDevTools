@@ -129,15 +129,25 @@ def merged_content_bbox(frame_paths, bg_tol=60, step=2):
 
 
 # ------------------------------------------------------------ 缩放 ----
-def downsample_average(im, tw, th):
+def downsample_average(im, tw, th, fit="stretch"):
     """面积平均降采样到 tw×th（无网格时的平滑像素化；防摩尔纹）。
 
     与 nearest（丢信息）/ 网格采样（无网格不适用）不同，平均法保留每格主色。
     输入可带 alpha（绿幕抠像后）：透明像素不参与色平均；
     输出 alpha 两态化 —— 格内不透明占比 ≥1/2 → 不透明（取不透明像素均值），否则透明。
+    fit: 'stretch'（默认，直接缩放，可能拉伸失真）
+         'contain'（等比适配：保持源宽高比，长边对齐目标，居中留透明边——角色不变形）
     """
     im = im.convert("RGBA")
     w, h = im.size
+    if fit == "contain" and (w, h) != (tw, th):
+        # 等比：缩到目标画布内最大尺寸，居中放置（透明留白，不拉伸）
+        scale = min(tw / w, th / h)
+        nw, nh = max(1, round(w * scale)), max(1, round(h * scale))
+        small = downsample_average(im, nw, nh, fit="stretch")
+        out = Image.new("RGBA", (tw, th), (0, 0, 0, 0))
+        out.paste(small, ((tw - nw) // 2, (th - nh) // 2))
+        return out
     out = Image.new("RGBA", (tw, th))
     po, pi = out.load(), im.load()
     for ty in range(th):
@@ -275,7 +285,7 @@ def video_standardize(video, out, *, fps=None, size=None, crop="auto",
                       box=None, bg_tol=60, colors=16, palette=None,
                       outline=None, make_gif=True, make_html=True,
                       keep_frames=True, grid=None, sampling="mode", bg="auto",
-                      key="auto"):
+                      key="auto", fit="contain"):
     """视频标准化主流程。返回 report dict。
 
     size: 目标像素尺寸 (tw,th)；None=不缩放（仅量化）。
@@ -350,7 +360,7 @@ def video_standardize(video, out, *, fps=None, size=None, crop="auto",
     else:
         if size:
             tw, th = size
-            outs = [downsample_average(f, tw, th) for f in frames]
+            outs = [downsample_average(f, tw, th, fit=fit) for f in frames]
         else:
             outs = [f.convert("RGBA") for f in frames]
         # 背景透明化：绿幕已抠像（alpha 两态，跳过）；非绿幕才做连通清除（与背景色接近，容差 24）

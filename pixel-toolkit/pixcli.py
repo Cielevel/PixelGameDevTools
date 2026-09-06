@@ -181,7 +181,7 @@ def cmd_video_std(args):
         bg_tol=args.bg_tol, colors=args.colors, palette=args.palette,
         outline=args.outline, make_gif=not args.no_gif, make_html=not args.no_html,
         keep_frames=not args.no_frames, grid=args.grid, sampling=args.sampling,
-        bg=args.bg, key=args.key)
+        bg=args.bg, key=args.key, fit=args.fit)
     print("[video-std] {} {}x{} {}fps {} → {} 帧 {}（{}）".format(
         os.path.basename(args.video), rep["width"], rep["height"], rep["fps"],
         rep["codec"], rep["frames_used"],
@@ -458,6 +458,8 @@ def main(argv=None):
     p.add_argument("-o", "--out", required=True, help="输出目录（帧序列 <名>_NN.png + <名>.gif + <名>.html）")
     p.add_argument("--fps", type=float, default=None, help="重采样帧率（默认视频原生；如 24 源 → 12 减半）")
     p.add_argument("--size", type=_parse_size, default=None, help="目标像素尺寸 WxH（如 64x64；默认不缩放仅量化）")
+    p.add_argument("--fit", choices=("contain", "stretch"), default="contain",
+                   help="缩放到 --size 的方式：contain=等比适配居中留边（默认，不变形）| stretch=直接拉伸（可能变扁/变瘦）")
     p.add_argument("--crop", choices=("auto", "none", "fixed"), default="auto",
                    help="auto=全程合并内容 bbox 裁剪（默认）| none=不裁剪 | fixed=用 --box")
     p.add_argument("--box", default=None, help="固定裁剪框 x0,y0,x1,y1（配合 --crop fixed）")
