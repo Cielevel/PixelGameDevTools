@@ -58,13 +58,9 @@ th,td { padding:2px 6px; text-align:left; }
     <input type="file" id="file" accept="video/*" hidden>
     <div id="vmeta"></div>
 
-    <fieldset><legend>① 视频区间</legend>
-      <div class="row"><label>起点(s)</label><input type="number" id="t0" step="0.1" min="0" value="0"></div>
-      <div class="row"><label>终点(s)</label><input type="number" id="t1" step="0.1" min="0" value="0"></div>
-      <div class="row">
-        <button class="mini" id="setT0" title="把当前预览位置的秒数设为起点">从当前位置起</button>
-        <button class="mini" id="setT1" title="把当前预览位置的秒数设为终点">到当前位置止</button>
-      </div>
+    <fieldset><legend>① 裁剪区间（可多个，拍完一段接下一段）</legend>
+      <div id="ranges"></div>
+      <div class="row"><button id="addRange" class="mini">＋ 添加区间</button><span class="note">不重叠；播放顺序 = 列表顺序</span></div>
     </fieldset>
 
     <fieldset><legend>② 采样帧率</legend>
@@ -79,8 +75,14 @@ th,td { padding:2px 6px; text-align:left; }
     </fieldset>
 
     <fieldset><legend>③ 标准化参数</legend>
-      <div class="row"><label>目标尺寸</label><input type="number" id="ow" min="1" value="64"><label>×</label><input type="number" id="oh" min="1" value="64"><label>px</label></div>
+      <div class="row"><label>主体尺寸</label><input type="number" id="ow" min="1" value="64"><label>×</label><input type="number" id="oh" min="1" value="64"><label>px</label><span class="note">等比缩放主体到该尺寸</span></div>
+      <div class="row"><label>输出画布</label><input type="number" id="cw" min="1" value="64"><label>×</label><input type="number" id="ch" min="1" value="64"><label>px</label><span class="note">不改主体大小，调画布大小即调占比</span></div>
       <div class="row"><label>等比保形</label><input type="checkbox" id="fit" checked><span class="note">contain（居中留边）</span></div>
+      <div class="row"><label>主体位置</label>
+        <button class="mini" id="mvL">←</button><button class="mini" id="mvU">↑</button><button class="mini" id="mvD">↓</button><button class="mini" id="mvR">→</button>
+        <input type="number" id="dx" min="-99" max="99" value="0" style="width:48px"><input type="number" id="dy" min="-99" max="99" value="0" style="width:48px">
+        <button class="mini" id="mvReset">复位</button>
+      </div>
       <div class="row"><label>目标色数</label><input type="number" id="colors" min="0" max="64" value="16"><span class="note">0=不量化</span></div>
       <div class="row"><label>1px 描边</label><input type="color" id="outlineColor" value="#000000"><input type="checkbox" id="outline" checked></div>
       <div class="row"><label>绿幕抠像</label>
@@ -168,6 +170,27 @@ function alphaStats(id) {
     if (d[i+3]>0) { total++; if(x<x0)x0=x; if(y<y0)y0=y; if(x>x1)x1=x; if(y>y1)y1=y; }
   }
   return { count: total, bbox: total ? [x0,y0,x1,y1] : null };
+}
+
+/* 主体放置到输出画布：不改变主体像素大小，画布 cw×ch，主体居中后按 dx/dy 平移（越界裁剪）。
+   输入 img 为"主体尺寸"帧（含透明边）；输出 cw×ch 帧。 */
+function placeOnCanvas(img, cw, ch, dx, dy) {
+  const out = new Uint8ClampedArray(cw*ch*4);
+  const s = alphaStats(img);
+  if (!s.bbox) return { width:cw, height:ch, data:out };
+  const [bx0, by0] = s.bbox;
+  const bw = s.bbox[2]-bx0+1, bh = s.bbox[3]-by0+1;
+  const ox = Math.round((cw-bw)/2) - bx0 + (dx|0);
+  const oy = Math.round((ch-bh)/2) - by0 + (dy|0);
+  for (let y=0;y<img.height;y++) for (let x=0;x<img.width;x++) {
+    const i=(y*img.width+x)*4;
+    if (!img.data[i+3]) continue;
+    const nx=x+ox, ny=y+oy;
+    if (nx<0||ny<0||nx>=cw||ny>=ch) continue;
+    const j=(ny*cw+nx)*4;
+    out[j]=img.data[i]; out[j+1]=img.data[i+1]; out[j+2]=img.data[i+2]; out[j+3]=255;
+  }
+  return { width:cw, height:ch, data:out };
 }
 
 /* 等比降采样（含 alpha 两态化：格内不透明占比 ≥1/2 → 不透明取均值，否则透明）
@@ -268,7 +291,7 @@ function analyzeId(id) {
 }
 
 /* ═══════════════ UI 层 ═══════════════ */
-const V = { video:null, url:null, dur:0, frames:[], processed:[], playing:false, timer:null, fidx:0 };
+const V = { video:null, url:null, dur:0, frames:[], processed:[], playing:false, timer:null, fidx:0, ranges:[] };
 
 function setStatus(msg, err) { $('status').textContent = msg; $('status').style.color = err ? 'var(--warn)' : 'var(--sub)'; }
 
@@ -282,7 +305,8 @@ function loadVideoFile(file) {
   v.muted = true; v.preload = 'auto'; v.src = V.url;
   v.onloadedmetadata = () => {
     V.video = v; V.dur = v.duration || 0;
-    $('t1').value = V.dur.toFixed(2);
+    V.ranges = [{ t0: 0, t1: V.dur }];
+    renderRanges();
     $('vmeta').textContent =
       `${file.name}\n尺寸 ${v.videoWidth}×${v.videoHeight} · 时长 ${V.dur.toFixed(2)}s · 浏览器解码`;
     buildTimeline();
@@ -291,7 +315,43 @@ function loadVideoFile(file) {
   v.onerror = () => setStatus('视频解码失败（编码/容器不支持；MOV 建议转 MP4，用 Chrome/Edge）', true);
 }
 
-/* --- 时间轴（粗：显示区间） --- */
+/* --- 区间列表渲染 --- */
+function renderRanges() {
+  const box = $('ranges'); box.innerHTML = '';
+  V.ranges.forEach((r, idx) => {
+    const row = document.createElement('div');
+    row.className = 'range row';
+    row.style.border = '1px solid var(--edge)'; row.style.borderRadius='4px'; row.style.padding='4px'; row.style.marginBottom='4px';
+    row.innerHTML = `<span class="note">#${idx+1}</span>
+      <input type="number" class="r0" step="0.1" min="0" value="${r.t0.toFixed(2)}" style="width:64px">
+      ~ <input type="number" class="r1" step="0.1" min="0" value="${r.t1.toFixed(2)}" style="width:64px"> s
+      <button class="mini rset0" title="把当前预览位置设为该区间起点">◉起</button>
+      <button class="mini rset1" title="把当前预览位置设为该区间终点">◉止</button>
+      <button class="mini rdel" title="删除该区间">✕</button>`;
+    row.querySelector('.r0').oninput = () => { if (V.video) traceRange(); };
+    row.querySelector('.r1').oninput = () => { if (V.video) traceRange(); };
+    row.querySelector('.rset0').onclick = () => { row.querySelector('.r0').value = (V.video.currentTime||0).toFixed(2); traceRange(); };
+    row.querySelector('.rset1').onclick = () => { row.querySelector('.r1').value = (V.video.currentTime||0).toFixed(2); traceRange(); };
+    row.querySelector('.rdel').onclick = () => { if (V.ranges.length > 1) { V.ranges.splice(idx,1); renderRanges(); traceRange(); } };
+    box.appendChild(row);
+  });
+  const rows = () => Array.from(document.querySelectorAll('#ranges .range'));
+  V.syncRanges = () => {   // DOM → V.ranges
+    V.ranges = []; rows().forEach(row => {
+      const t0 = Math.max(0, +row.querySelector('.r0').value || 0);
+      const t1 = Math.min(V.dur||1e9, +row.querySelector('.r1').value || (V.dur||1e9));
+      if (t1 > t0) V.ranges.push({ t0, t1 });
+    });
+    if (!V.ranges.length && V.dur) V.ranges = [{ t0:0, t1:V.dur }];
+  };
+}
+function traceRange() {   // 区间变化：同步 V.ranges + 重绘时间轴 + 自动重抽帧
+  V.syncRanges && V.syncRanges();
+  drawTimeline();
+  onParamChange('fps');   // 复用防抖（触发重抽帧）
+}
+
+/* --- 时间轴（显示多个区间块） --- */
 function buildTimeline() {
   const tl = $('timeline'); tl.textContent = '';
   const bar = document.createElement('canvas'); bar.width = 900; bar.height = 26; bar.style.width='100%';
@@ -301,23 +361,27 @@ function buildTimeline() {
 function drawTimeline() {
   const bar = $('timeline').firstChild; if (!bar || !V.dur) return;
   const c = bar.getContext('2d'); c.clearRect(0,0,bar.width,bar.height);
-  const t0 = +$('t0').value||0, t1 = +$('t1').value||V.dur;
   c.fillStyle = '#2a2e35'; c.fillRect(0,0,bar.width,bar.height);
-  c.fillStyle = '#4da3ff55'; c.fillRect(Math.max(0,t0/V.dur)*bar.width,0, Math.min(V.dur,t1)-Math.max(0,t0),0.75? (Math.min(V.dur,t1)-Math.max(0,t0))/V.dur*bar.width : 0);
-  c.fillRect(Math.max(0,t0/V.dur)*bar.width,0,(Math.min(V.dur,t1)-Math.max(0,t0))/V.dur*bar.width,bar.height);
-  c.strokeStyle = '#d8dde6'; c.beginPath();
-  c.moveTo(Math.max(0,t0/V.dur)*bar.width,0); c.lineTo(Math.max(0,t0/V.dur)*bar.width,bar.height);
-  c.moveTo(Math.min(V.dur,t1)/V.dur*bar.width,0); c.lineTo(Math.min(V.dur,t1)/V.dur*bar.width,bar.height);
-  c.stroke();
+  const colors = ['#4da3ff66','#ff8a3d66','#3fbf7f66','#c05fd766'];
+  const ranges = V.ranges && V.ranges.length ? V.ranges : [{t0:0,t1:V.dur}];
+  ranges.forEach((r, i) => {
+    const x0 = Math.max(0, r.t0)/V.dur*bar.width;
+    const w = (Math.min(V.dur,r.t1)-Math.max(0,r.t0))/V.dur*bar.width;
+    c.fillStyle = colors[i%colors.length]; c.fillRect(x0, 4, w, bar.height-8);
+    c.strokeStyle = '#d8dde6'; c.strokeRect(x0, 4, w, bar.height-8);
+  });
 }
 
 /* --- 抽帧: 区间 t0~t1 每秒 fps 帧，均匀采样 --- */
 async function extractFrames() {
   const v = V.video; if (!v) return [];
-  const t0 = Math.max(0, +$('t0').value||0), t1 = Math.min(V.dur, +$('t1').value||V.dur);
   const fps = Math.max(1, +$('fps').value || 24);
-  const n = Math.max(1, Math.round((t1 - t0) * fps));
-  const frames = []; setStatus(`抽帧中：${n} 帧（${fmtT(t0)}~${fmtT(t1)} @ ${fps}fps）…`);
+  const ranges = getRanges();
+  const frames = [];
+  let total = 0;
+  const plan = [];
+  for (const r of ranges) { const n = Math.max(1, Math.round((r.t1 - r.t0) * fps)); plan.push({ ...r, n }); total += n; }
+  setStatus(`抽帧中：${total} 帧（${ranges.length} 个区间 @ ${fps}fps）…`);
   const waitSeek = t => new Promise(res => {
     let done = false;
     const finish = () => { if (!done) { done = true; v.removeEventListener('seeked', finish); res(); } };
@@ -325,13 +389,29 @@ async function extractFrames() {
     v.currentTime = Math.max(0, Math.min(t, V.dur - 0.001));
     setTimeout(finish, 1200);   // 兜底（seek 相同时间不触发 seeked 时）
   });
-  for (let i=0; i<n; i++) {
-    const t = t0 + (i+0.5) * (t1-t0)/n;
-    await waitSeek(t);
-    frames.push(frameToImageData(v));
-    if (i % 8 === 0) { $('status').textContent = `抽帧 ${i+1}/${n}…`; await new Promise(r=>requestAnimationFrame(r)); }
+  let done = 0;
+  for (const r of plan) {
+    for (let i=0; i<r.n; i++) {
+      const t = r.t0 + (i+0.5) * (r.t1-r.t0)/r.n;
+      await waitSeek(t);
+      frames.push(frameToImageData(v));
+      done++;
+      if (done % 8 === 0 || done === total) { $('status').textContent = `抽帧 ${done}/${total}…`; await new Promise(rr=>requestAnimationFrame(rr)); }
+    }
   }
   return frames;
+}
+
+/* 区间列表（来自 DOM #ranges 行） */
+function getRanges() {
+  const rows = Array.from(document.querySelectorAll('#ranges .range'));
+  const out = [];
+  for (const row of rows) {
+    const t0 = Math.max(0, +row.querySelector('.r0').value || 0);
+    const t1 = Math.min(V.dur || 1e9, +row.querySelector('.r1').value || (V.dur || 1e9));
+    if (t1 > t0) out.push({ t0, t1 });
+  }
+  return out.length ? out : [{ t0: 0, t1: V.dur || 0 }];
 }
 
 function frameToImageData(src) {
@@ -358,6 +438,8 @@ function processAll(frames) {
   setStatus('标准化处理中…');
   const k = +$('colors').value || 0;
   const fit = $('fit').checked;
+  const cw = Math.max(1,+$('cw').value||64), ch = Math.max(1,+$('ch').value||64);
+  const dx = +( $('dx').value || 0)|0, dy = +($('dy').value || 0)|0;
   const raw = [];
   for (const f of frames) { const im = { width:f.width, height:f.height, data:new Uint8ClampedArray(f.data) };
     let img = im;
@@ -365,6 +447,7 @@ function processAll(frames) {
     if (key === 'green' || (key === 'auto' && detectGreen(img))) img = chromaKey(img);
     const ow=Math.max(1,+$('ow').value||64), oh=Math.max(1,+$('oh').value||64);
     img = downsampleContain(img, ow, oh, fit);
+    img = placeOnCanvas(img, cw, ch, dx, dy);   // 放置到输出画布 + 位置偏移（主体像素不变）
     raw.push(img);
   }
   const outline = $('outline').checked, ocol = $('outlineColor').value;
@@ -634,44 +717,88 @@ function lzwEncode(indices, minCodeSize) {
 }
 
 /* ─── 主逻辑绑定 ─── */
+/* ─── 处理管线（全局） ─── */
+let busy = false;
+async function runPipeline() {
+  if (!V.video) { setStatus('请先加载视频', true); return; }
+  if (busy) return; busy = true; $('pbtn').disabled = true;
+  try {
+    const frames = await extractFrames();
+    if (!frames.length) { setStatus('未抽到帧（检查区间/时长）', true); return; }
+    V.raw = frames;
+    finishProcess(processAll(frames));
+  } finally { busy = false; $('pbtn').disabled = false; }
+}
+function reprocess() {
+  if (!V.raw || !V.raw.length) return;
+  finishProcess(processAll(V.raw));
+}
+function finishProcess(processed) {
+  V.processed = processed;
+  V.fidx = 0;
+  $('frameIdx').max = Math.max(0, V.processed.length-1);
+  $('frameNo').textContent = V.processed.length ? `1/${V.processed.length}` : '0/0';
+  if (V.processed.length) renderFrame(V.processed[0], +$('zoomN').value || 4);
+  updateStats();
+  buildExports();
+  $('playbtn').disabled = !V.processed.length;
+  setStatus(`完成：${V.processed.length} 帧（${V.processed[0].width}×${V.processed[0].height}）`);
+}
+function showFrame(i) { V.fidx=i; renderFrame(V.processed[i], +$('zoomN').value||4); $('frameIdx').value=i; $('frameNo').textContent=(i+1)+'/'+V.processed.length; }
+
+/* ─── 参数变化 → 防抖自动重处理（区间/帧率重抽帧；处理参数仅重跑管线） ─── */
+const STAM = new Set(['fps']);
+let debounceT = null;
+function onParamChange(id) {
+  clearTimeout(debounceT);
+  debounceT = setTimeout(() => {
+    if (STAM.has(id)) { if (V.video) runPipeline(); }
+    else reprocess();
+  }, 350);
+}
+
+function buildExports() {
+  const box = $('exports'); box.innerHTML='';
+  const defs = [
+    ['expHtml', 'HTML 播放器', exportHtml],
+    ['expGif', 'GIF', exportGif],
+    ['expSheet', 'Sprite Sheet', exportSheet],
+    ['expPngs', 'PNG 序列', exportPngs],
+    ['dlZip', 'ZIP（PNG 打包）', exportZip],
+  ];
+  for (const [id,label,fn] of defs) {
+    const b = document.createElement('button');
+    b.textContent = label;
+    b.onclick = () => { try { fn(); setStatus(`已导出：${label}`); } catch(e) { setStatus('导出失败: '+e.message, true); } };
+    box.appendChild(b);
+  }
+  $('expNote').textContent = '点上述按钮逐个导出（浏览器下载）。';
+}
+
+/* ─── 初始化：事件绑定 ─── */
 function init() {
   $('drop').addEventListener('dragover', e => { e.preventDefault(); $('drop').classList.add('hover'); });
   $('drop').addEventListener('dragleave', () => $('drop').classList.remove('hover'));
   $('drop').addEventListener('drop', e => { e.preventDefault(); $('drop').classList.remove('hover'); const f=e.dataTransfer.files[0]; if (f) loadVideoFile(f); });
   $('file').onchange = e => { if (e.target.files[0]) loadVideoFile(e.target.files[0]); };
-  $('setT0').onclick = () => { if (V.video){ $('t0').value = (V.video.currentTime||0).toFixed(2); drawTimeline(); } };
-  $('setT1').onclick = () => { if (V.video){ $('t1').value = (V.video.currentTime||0).toFixed(2); drawTimeline(); } };
-  $('t0').onchange = drawTimeline; $('t1').onchange = drawTimeline;
-  document.querySelectorAll('[data-fps]').forEach(b => b.onclick = () => { $('fps').value = b.dataset.fps; });
+  $('addRange').onclick = () => {
+    if (!V.video || !V.dur) { setStatus('请先加载视频', true); return; }
+    const last = V.ranges[V.ranges.length-1];
+    const t0 = Math.min(V.dur, (last ? last.t1 : 0) + 0.5);
+    V.ranges.push({ t0, t1: Math.min(V.dur, t0 + 1) });
+    renderRanges(); traceRange();
+  };
+  document.querySelectorAll('[data-fps]').forEach(b => b.onclick = () => { $('fps').value = b.dataset.fps; onParamChange('fps'); });
 
-  let busy = false;
-  async function runPipeline() {
-    if (busy) return; busy = true; $('pbtn').disabled = true;
-    try {
-      const frames = await extractFrames();
-      if (!frames.length) { setStatus('未抽到帧（检查区间/时长）', true); return; }
-      V.raw = frames;
-      finishProcess(processAll(frames));
-    } finally { busy = false; $('pbtn').disabled = false; }
-  }
-  function reprocess() {   // 参数变化：只用缓存的原始帧重跑处理管线（不重新抽帧）
-    if (!V.raw || !V.raw.length) return;
-    finishProcess(processAll(V.raw));
-  }
-  function finishProcess(processed) {
-    V.processed = processed;
-    V.fidx = 0;
-    $('frameIdx').max = Math.max(0, V.processed.length-1);
-    $('frameNo').textContent = V.processed.length ? `1/${V.processed.length}` : '0/0';
-    if (V.processed.length) renderFrame(V.processed[0], +$('zoomN').value || 4);
-    updateStats();
-    buildExports();
-    $('playbtn').disabled = !V.processed.length;
-    setStatus(`完成：${V.processed.length} 帧（${V.processed[0].width}×${V.processed[0].height}）`);
-  }
+  // 主体位置移动（每步 1px）
+  const MV = 1;
+  $('mvL').onclick = () => { $('dx').value = (+$('dx').value||0) - MV; onParamChange('dx'); };
+  $('mvR').onclick = () => { $('dx').value = (+$('dx').value||0) + MV; onParamChange('dx'); };
+  $('mvU').onclick = () => { $('dy').value = (+$('dy').value||0) - MV; onParamChange('dy'); };
+  $('mvD').onclick = () => { $('dy').value = (+$('dy').value||0) + MV; onParamChange('dy'); };
+  $('mvReset').onclick = () => { $('dx').value = 0; $('dy').value = 0; onParamChange('dx'); };
 
   $('pbtn').onclick = runPipeline;
-
   $('playbtn').onclick = () => {
     if (!V.processed.length) return;
     if (V.playing) { V.playing=false; clearInterval(V.timer); $('playbtn').textContent='▶ 播放'; return; }
@@ -679,48 +806,16 @@ function init() {
     const fps = Math.max(1,+$('fps').value||12);
     V.timer = setInterval(()=>{ V.fidx=(V.fidx+1)%V.processed.length; showFrame(V.fidx); }, 1000/fps);
   };
-
-  function showFrame(i) { V.fidx=i; renderFrame(V.processed[i], +$('zoomN').value||4); $('frameIdx').value=i; $('frameNo').textContent=(i+1)+'/'+V.processed.length; }
   $('frameIdx').oninput = e => { showFrame(+e.target.value); };
   $('zoom').oninput = e => { $('zoomN').value=e.target.value; if (V.processed.length) renderFrame(V.processed[V.fidx], +e.target.value); };
   $('zoomN').oninput = e => { $('zoom').value=e.target.value; if (V.processed.length) renderFrame(V.processed[V.fidx], +e.target.value); };
 
-  // 参数修改 → 即时（oninput）+ 防抖自动重处理：
-  // 区间/帧率变化需重抽帧；处理参数变化只用缓存帧重跑管线（更快）
-  const STAM = new Set(['t0','t1','fps']);   // 需要重新抽帧的参数
-  let debounceT = null;
-  function onParamChange(id) {
-    clearTimeout(debounceT);
-    debounceT = setTimeout(() => {
-      if (STAM.has(id)) { if (V.video) runPipeline(); }
-      else reprocess();
-    }, 350);
-  }
-  ['t0','t1','fps','ow','oh','colors','fit','outline','outlineColor','key'].forEach(id => {
+  // 处理参数（oninput 即时 + 防抖）：fps 需重抽帧；其余仅重跑管线
+  ['fps','ow','oh','cw','ch','dx','dy','colors','fit','outline','outlineColor','key'].forEach(id => {
     $(id).addEventListener('input', () => onParamChange(id));
   });
-  $('t0').addEventListener('change', drawTimeline);
-  $('t1').addEventListener('change', drawTimeline);
-
-  function buildExports() {
-    const box = $('exports'); box.innerHTML='';
-    const defs = [
-      ['expHtml', 'HTML 播放器', exportHtml],
-      ['expGif', 'GIF', exportGif],
-      ['expSheet', 'Sprite Sheet', exportSheet],
-      ['expPngs', 'PNG 序列', exportPngs],
-      ['dlZip', 'ZIP（PNG 打包）', exportZip],
-    ];
-    for (const [id,label,fn] of defs) {
-      const b = document.createElement('button');
-      b.textContent = label;
-      b.onclick = () => { try { fn(); setStatus(`已导出：${label}`); } catch(e) { setStatus('导出失败: '+e.message, true); } };
-      box.appendChild(b);
-    }
-    $('expNote').textContent = '点上述按钮逐个导出（浏览器下载）。';
-  }
 }
-document.addEventListener('DOMContentLoaded', init);
+
 </script>
 </body>
 </html>
