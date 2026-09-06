@@ -16,7 +16,7 @@ from palette import rgb_to_hex
 
 NEIGH4 = ((1, 0), (-1, 0), (0, 1), (0, -1))
 
-# 帧组识别：stem 末尾的 _NN（两位帧号）剥离后即组键，如 slime_idle_03 → slime_idle
+# 帧组识别：stem 末尾的 _NN（两位帧号）剥离后即组键，如 hero_idle_03 → hero_idle
 FRAME_NO = re.compile(r"_(\d+)$")
 
 # 动画一致性阈值（帧间像素 diff 率 = 变化像素 / 不透明并集）
@@ -242,7 +242,7 @@ def run(paths, expected_size=None, max_colors=16, palette=None, frames=True, ani
     """批量检查。返回 [(kind, ref, issues), ...]：kind='image' 时 ref=info dict；
     kind='group' 时 ref=帧组键（帧组级问题：对齐 / 动画一致性）。
 
-    帧组按文件名前缀自动聚合（slime_idle_00..07 → slime_idle 一组），
+    帧组按文件名前缀自动聚合（hero_idle_00..07 → hero_idle 一组），
     整目录混检时各资产各自成组互不干扰；组内不足 2 帧不做帧组检查。
     """
     results = []

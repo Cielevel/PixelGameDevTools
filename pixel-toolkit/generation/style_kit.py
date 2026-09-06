@@ -1,4 +1,4 @@
-"""风格基准库 —— 源自史莱姆（slime_idle，2026-09-03 定案）的明暗与造型惯例。
+"""风格基准库 —— 通用明暗与造型惯例（面向任意像素角色/怪物）。
 
 供 pixel-artist 复用（效率模式默认、全量模式同样可用），保证系列资产风格一致：
 - 光源左上；明暗阶次 shadow → mid → light → highlight（+ glint 亮芯 / 眼神光）
@@ -9,14 +9,13 @@
 
 用法约定：颜色一律取自角色调色板 `Palette.load(...).roles`（先入板再使用）；
 绘制收尾统一 `Canvas.outline_in(roles["outline"])` 形成 1px 闭合内描边。
-参考实现：同目录 `gen_slime_idle.py`。新怪物以既有资产为模板，
-只改几何与配色参数，不另发明明暗模型。
+具体角色脚本以本库函数为参数化惯例（几何/配色由脚本传入，不另发明明暗模型）。
 """
 from __future__ import annotations
 
 import math
 
-# ---- 明暗模型参数（slime 基准值，同类对象可直接沿用，按对象微调走关键字参数） ----
+# ---- 明暗模型参数（通用基准值，同类对象可直接沿用，按对象微调走关键字参数） ----
 BAND = 2              # 轮廓带检测距离（px）
 LIGHT_V = 0.35        # 受光带只出现在竖直参数 v < LIGHT_V 的上部
 LIGHT_U = 0.15        # 受光带只出现在水平参数 u < LIGHT_U 的偏左一侧
@@ -26,11 +25,19 @@ BOTTOM_SHADOW = 2     # 贴地接触阴影行数
 
 
 def dome_widths(w_start, w_full, n_d):
-    """穹顶各行宽度：w_start → w_full，偶数步进，大步进靠上（凸穹顶，圆形像素阶梯）。"""
+    """穹顶各行宽度：w_start → w_full，偶数步进，大步进靠上（凸穹顶，圆形像素阶梯）。
+
+    行数与加宽预算自适应：预算不足时收窄行数，保证任意圆/软体（含窄穹顶）不崩溃。
+    """
     # 步数必须少于可用步进预算，保证穹顶至少一次大步进（否则收敛成圆锥尖）
-    n_d = min(n_d, (w_full - w_start) // 2)
-    steps = n_d - 1
     total = (w_full - w_start) // 2
+    if total <= 0:
+        # 无加宽空间（等宽/退化穹顶）：单行，预防除零
+        return [w_start]
+    n_d = max(1, min(n_d, total + 1))
+    if n_d <= 1:
+        return [w_start]
+    steps = n_d - 1
     base = total // steps
     extra = total - base * steps
     deltas = sorted((2 * (base + (1 if i < extra else 0)) for i in range(steps)), reverse=True)
@@ -44,12 +51,19 @@ def body_rows(cx, w, h, w_start, n_d, ground_y):
     """穹顶剪影的逐行 (xl, xr)，水平居中于 cx，底行左右各收 1px（贴地圆角）。
 
     返回 (rows, y_top)；rows 覆盖 y_top .. ground_y（脚底贴地）。
+    中间满宽行数按实际穹顶长度计算（`len(dome)`），避免窄穹顶把精灵缩短悬浮。
     """
     dome = dome_widths(w_start, w, n_d)
-    widths = dome + [w] * (h - n_d - 1) + [w - 2]
+    nd = len(dome)
+    n_mid = h - nd - 1
+    if n_mid >= 0:
+        widths = dome + [w] * n_mid + [w - 2]
+    else:
+        # 异常输入（h 小于穹顶本身行数）：截断到 h 行兜底，不越界
+        widths = dome[:h]
     y_top = ground_y + 1 - h
     rows = []
-    for wd in widths:
+    for wd in widths[:h]:
         half = wd / 2.0
         rows.append((int(math.ceil(cx - half - 1e-9)), int(math.floor(cx + half + 1e-9))))
     return rows, y_top
@@ -176,7 +190,7 @@ def shade_mask(c, inside, mid, light, shadow, *, band=BAND, bottom_shadow=BOTTOM
 
 
 # ============================================================ 通用绘制基元 ----
-# （2026-09-04 自 gen_player.py 原样下沉：玩家形象作废清理，基元为共享设施）
+# （通用共享设施：线/管/行表/明暗/平涂，供各角色生成脚本复用）
 # ---------------------------------------------------------------- 基元 ----
 def line_pts(p0, p1):
     """Bresenham 线段上的全部整数点（含两端）。"""

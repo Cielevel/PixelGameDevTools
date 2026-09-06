@@ -9,7 +9,7 @@ PREFIX_DIRS 为典型像素游戏的通用起步默认，按目标工程的资�
   fx/      特效（fx_*）
   pickup/  拾取（pick_*）
   icon/    UI 图标（icon_*）
-  base/    风格基准资产（清单外，如 slime_idle）
+  base/    风格基准资产（清单外，如 <资产名>_idle 基准存档）
 新增资产按前缀自动归位；前缀匹配不到时落 base/ 并在交付说明中提示主代理确认。
 """
 from __future__ import annotations

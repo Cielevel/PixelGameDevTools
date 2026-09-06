@@ -2,9 +2,9 @@
 
 JSON 格式（存放于 `assets/palettes/`）：
 {
-  "name": "slime",
-  "colors": ["#0b1e3a", "#123c6b", ...],
-  "roles": {"outline": "#0b1e3a", "shadow": "#123c6b", "mid": "...", "light": "...", "highlight": "..."}
+  "name": "<调色板名>",
+  "colors": ["#111111", "#222222", ...],
+  "roles": {"outline": "#111111", "shadow": "#222222", "mid": "...", "light": "...", "highlight": "..."}
 }
 roles 可选；colors 建议按 明→暗 或按用途排列，单张精灵 ≤16 色（含描边色）。
 """

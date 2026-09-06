@@ -16,7 +16,7 @@
 
 | 文件 / 目录 | 职责 |
 | --- | --- |
-| `generation/` | **纯程序化生成素材方案**（独立类别）：`canvas.py` 绘制基元 / `style_kit.py` 风格基准库 / `gen_*.py` 资产生成脚本（`gen_slime_idle.py` 骨架范例）；类别总纲、脚本约定与骨架见其 `README.md`，后续「纯程序验证素材」功能将与此类别并列 |
+| `generation/` | **纯程序化生成素材方案**（独立类别）：`canvas.py` 绘制基元 / `style_kit.py` 风格基准库 / `gen_*.py` 资产生成脚本（按约定自建）；类别总纲、脚本约定与骨架见其 `README.md`，后续「纯程序验证素材」功能将与此类别并列 |
 | `palette.py` | 调色板 JSON 读写（`assets/palettes/`）、最近色映射（OKLab 感知色距）、`quantize` 归入色板、`enforce_alpha` 两态化、色条 PNG 导出 |
 | `standardize.py` | AI 像素图标准化：亮度梯度自相关检测逻辑网格（含相位）→ 单元内鲁棒采样（众数分桶+mean-shift / 逐通道中位数）→ OKLab 加权 k-means 量化 / 映射工程色板 → 四角背景检测（边界连通清除）；多输入自动共享网格与色板（防闪烁）。源自 `ai-pixel-art-standardization-handoff/` 交接包升级建议，实测报告见其 `report-standardization-bench.md` |
 | `anim.py` | 序列帧 I/O、sprite sheet 拼合/切分、GIF 导出、自包含 HTML 播放器、放大逐帧检查图（可叠像素网格坐标）、洋葱皮静态检查图 |
@@ -29,8 +29,8 @@
 ```bash
 # 自检（输入可以是文件列表或目录；帧组按文件名前缀自动聚合，整目录混检各资产互不干扰；
 # exit 1 = 有 P0/P1）。帧组查：帧尺寸 / 脚底与水平中心对齐 / 动画一致性
-python3 tools/pixelart/pixcli.py check assets/sprites/base/slime_idle_0*.png \
-    --size 32x32 --palette assets/palettes/slime.json
+python3 tools/pixelart/pixcli.py check assets/sprites/<资产>/<名称>_idle_0*.png \
+    --size 32x32 --palette assets/palettes/<调色板名>.json
 
 # 整目录混检（不设 --size/--palette 时做结构检查：模式/alpha/色数/孤立像素/帧组/动画）
 python3 tools/pixelart/pixcli.py check assets/sprites/base/
@@ -45,19 +45,19 @@ python3 tools/pixelart/pixcli.py anim assets/sprites/mob/mob_witch_idle_0*.png
 python3 tools/pixelart/pixcli.py onion assets/sprites/mob/mob_witch_idle_0*.png -o /tmp/onion.png
 
 # 帧序列 → 横向 sprite sheet（工作区约定：帧宽 = 原生宽，命名 <名称>_sheet.png）
-python3 tools/pixelart/pixcli.py sheet assets/sprites/base/slime_idle_0*.png -o assets/sprites/base/slime_idle_sheet.png
+python3 tools/pixelart/pixcli.py sheet assets/sprites/<资产>/<名称>_idle_0*.png -o assets/sprites/<资产>/<名称>_idle_sheet.png
 
 # 一键预览：GIF + HTML 播放器 + 放大逐帧检查图（输出到 previews/，交付用户查看）
-python3 tools/pixelart/pixcli.py preview assets/sprites/base/slime_idle_0*.png --out previews --name slime_idle --fps 10
+python3 tools/pixelart/pixcli.py preview assets/sprites/<资产>/<名称>_idle_0*.png --out previews --name <名称>_idle --fps 10
 
 # 放大逐帧检查图 + 像素网格（--grid：每源像素 1 线、每 8px 亮线并标坐标，审查引用坐标用）
-python3 tools/pixelart/pixcli.py contact assets/sprites/mob/mob_slime_idle_04.png -o /tmp/f04.png --grid --scale 8
+python3 tools/pixelart/pixcli.py contact assets/sprites/<资产>/<名称>_idle_04.png -o /tmp/f04.png --grid --scale 8
 
 # sheet 切回单帧
-python3 tools/pixelart/pixcli.py unsheet assets/sprites/base/slime_idle_sheet.png --size 32x32 -o /tmp/frames
+python3 tools/pixelart/pixcli.py unsheet assets/sprites/<资产>/<名称>_idle_sheet.png --size 32x32 -o /tmp/frames
 
 # 任意图归入工程调色板 + alpha 两态化（外部参考/模仿导入的结构性保色；OKLab 感知色距最近色）
-python3 tools/pixelart/pixcli.py quantize some.png --palette assets/palettes/slime.json -o out.png
+python3 tools/pixelart/pixcli.py quantize some.png --palette assets/palettes/<调色板名>.json -o out.png
 
 # AI 像素图标准化：自动检测网格 → 每格众数采样 → OKLab 量化 16 色 → 自动去背景
 # （JPEG 源先网格还原后量化；多输入自动共享网格与色板，输出 <原名>_std.png）
@@ -69,7 +69,7 @@ python3 tools/pixelart/pixcli.py standardize f0.jpg -o out.png --grid 32 --sampl
 python3 tools/pixelart/pixcli.py diff assets/sprites/mob /tmp/regen_mob
 
 # 调色板色条 / 从图像提取调色板
-python3 tools/pixelart/pixcli.py swatch assets/palettes/slime.json
+python3 tools/pixelart/pixcli.py swatch assets/palettes/<调色板名>.json
 python3 tools/pixelart/pixcli.py from-image some.png -o assets/palettes/new.json --max-colors 16
 
 # nearest 放大（仅供检查，正式资产不做放大）

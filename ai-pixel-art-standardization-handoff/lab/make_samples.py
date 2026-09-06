@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
 """制作标准化对照实验的测试样本。
 
-真值：复用仓库 gen_slime_idle 的 render_frame，产出 32x32 干净 RGBA 帧（8 色调色板）。
-模拟 Google Flow 输出：NEAREST 放大 32 倍 → 1024x1024 → 白底合成 → JPEG（有损）。
+> **失效声明（2026-09-06）**：本脚本依赖的 `gen_slime_idle.py`（史莱姆 demo 遗留生成脚本）
+> 已从仓库删除；脚本不再可运行，仅保留作为交接包 bench 实验的**历史存档**（实验方法可参考，
+> 真值生成需另备源）。真值：复用仓库自带真实像素资产（32x32 干净 RGBA 帧、≤16 色）即可。
+> 模拟 Google Flow 输出：NEAREST 放大 32 倍 → 1024x1024 → 白底合成 → JPEG（有损）。
 
 样本：
   sampleA_f0.jpg        单帧，NEAREST 放大 + JPEG q85（纯 JPEG 噪声，良性）

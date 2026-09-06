@@ -34,7 +34,8 @@ python3 pixel-toolkit/pixcli.py standardize -o dog_border_collie_grid_63.png \
 2. **色数**：源 2710 色（背景灰白渐变 249~255 占 82%）→ OKLab k=16 量化收敛 16 色；
    最终版为确保"≤16 色含描边"，先量化到 15 色再描边 = 16 色。
 3. **描边**：工程硬规格 `agent-pipeline/shared/像素资产约定.md` — 外轮廓 1px 深色描边且闭合；
-   采 `#182b54`（工程同族，非纯黑）；`outline_in` 内描边保剪影。验证：8-连通单闭合环、
+   本例采 `#182b54`（深蓝黑，非纯黑；**注**：该值源自原 demo 遗留脚本，后续资产应使用
+   工程调色板 `roles.outline` 而非套用此例）；`outline_in` 内描边保剪影。验证：8-连通单闭合环、
    alpha 边界 122px 全覆盖、零漏洞。
 4. **验收**：`pixcli check --size 64x64 --max-colors 16 asset-test/dog/dog_border_collie_final_64.png`
    → P0×0 P1×0 P2×0 通过。

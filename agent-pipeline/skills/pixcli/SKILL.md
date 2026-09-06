@@ -19,7 +19,7 @@ python tools/pixelart/pixcli.py <子命令> ...
 
 - **交付门禁只有一条**：`pixcli check ...` exit 0。exit 1 = 存在 P0/P1 必须修；P2 只是提示不拦截。
 - check 查：尺寸（`--size WxH`）、RGBA 模式、alpha 两态（0/255）、唯一色数 ≤16（`--max-colors`）、色板合规（`--palette assets/palettes/<名>.json`）、帧组脚底与水平中心对齐、动画一致性、孤立像素、连通域计数（`[图]` 行 `域N`）。
-- **帧组自动聚合**：按文件名 stem 前缀分组（`slime_idle_00..07` → 一组，`_sheet` 自成一组），**整目录混检各资产互不误报**；`[帧组 <名>]` 行出帧组级问题。关掉帧组检查仍用 `--no-frames --no-anim`。
+- **帧组自动聚合**：按文件名 stem 前缀分组（`<名称>_idle_00..07` → 一组，`_sheet` 自成一组），**整目录混检各资产互不误报**；`[帧组 <名>]` 行出帧组级问题。关掉帧组检查仍用 `--no-frames --no-anim`。
 - **动画一致性**（多帧组自动启用）：
   - 死帧（相邻帧像素完全相同）→ P1 门禁：动画没动或重复导出。
   - 帧间跳变 / 循环首尾突断 → P2 提示：先目视再定性，不自动成立。
@@ -31,7 +31,7 @@ python tools/pixelart/pixcli.py <子命令> ...
 
 ```bash
 # 门禁自检（显式通配或整目录皆可，帧组自动分组；exit 0 才可交付）
-python tools/pixelart/pixcli.py check assets/sprites/base/slime_idle_0*.png --size 32x32 --palette assets/palettes/slime.json
+python tools/pixelart/pixcli.py check assets/sprites/<资产>/<名称>_idle_0*.png --size 32x32 --palette assets/palettes/<调色板名>.json
 python tools/pixelart/pixcli.py check assets/sprites/base/
 
 # 动画统计：相邻/循环帧间 diff 率 + 面积序列（判断运动量级、循环衔接、体积守恒）
@@ -41,17 +41,17 @@ python tools/pixelart/pixcli.py anim assets/sprites/mob/mob_witch_idle_0*.png
 python tools/pixelart/pixcli.py onion assets/sprites/mob/mob_witch_idle_0*.png -o /tmp/onion.png
 
 # 放大逐帧检查图 + 像素网格（--grid：每 8px 亮线并标坐标，报告问题引用精确像素坐标用）
-python tools/pixelart/pixcli.py contact assets/sprites/mob/mob_slime_idle_04.png -o /tmp/f04.png --grid --scale 8
+python tools/pixelart/pixcli.py contact assets/sprites/<资产>/<名称>_idle_04.png -o /tmp/f04.png --grid --scale 8
 
 # 一键预览三件套（GIF + HTML 播放器 + 检查图；这是唯一放 previews/ 的输出）
-python tools/pixelart/pixcli.py preview assets/sprites/base/slime_idle_0*.png --out previews --name slime_idle --fps 10
+python tools/pixelart/pixcli.py preview assets/sprites/<资产>/<名称>_idle_0*.png --out previews --name <名称>_idle --fps 10
 
 # 帧组 ↔ sprite sheet（约定：横向、帧宽=原生宽、命名 <名称>_sheet.png）
-python tools/pixelart/pixcli.py sheet assets/sprites/base/slime_idle_0*.png -o assets/sprites/base/slime_idle_sheet.png
-python tools/pixelart/pixcli.py unsheet assets/sprites/base/slime_idle_sheet.png --size 32x32 -o /tmp/frames
+python tools/pixelart/pixcli.py sheet assets/sprites/<资产>/<名称>_idle_0*.png -o assets/sprites/<资产>/<名称>_idle_sheet.png
+python tools/pixelart/pixcli.py unsheet assets/sprites/<资产>/<名称>_idle_sheet.png --size 32x32 -o /tmp/frames
 
 # 任意图归入工程调色板 + alpha 两态化（外部参考/模仿导入的结构性保色；多输入时 -o 为目录）
-python tools/pixelart/pixcli.py quantize src.png --palette assets/palettes/slime.json -o out.png
+python tools/pixelart/pixcli.py quantize src.png --palette assets/palettes/<调色板名>.json -o out.png
 
 # 像素级比对：一致 exit 0，差异报数量/bbox/坐标（重构或改参后"零像素差异"的验收方式）
 python tools/pixelart/pixcli.py diff assets/sprites/mob /tmp/regen_mob
