@@ -8,7 +8,7 @@
 
 | 文件 | 说明 |
 |------|------|
-| `origin_video_greenbg.mp4` | **源（绿幕版，唯一）**：即梦 AI 生成像素视频，边牧 Idle 动画，绿幕背景（1280×720，24fps，10s，240 帧，H.264+AAC，~9.7MB） |
+| `dog_idle.mp4` | **源（绿幕版，唯一）**：即梦 AI 生成像素视频，边牧 Idle 动画，绿幕背景（1280×720，24fps，10s，240 帧，H.264+AAC，~9.7MB）。曾命名 `origin_video_greenbg.mp4`，已规范化 |
 | `README.md` | 本溯源文档 |
 
 > **历史说明**：早期灰底源 `origin_video.mp4`（1280×720，8s，192 帧）已删除——灰底与角色灰衣/灰身撞色，
@@ -50,7 +50,7 @@
 
 ```bash
 # 绿幕版完整标准化（12fps 采样 122 帧，64×64，16 色含描边，透明背景，等比保形）
-python3 pixel-toolkit/pixcli.py video-std asset-test/dog/video/origin_video_greenbg.mp4 \
+python3 pixel-toolkit/pixcli.py video-std asset-test/dog/video/dog_idle.mp4 \
     -o <out_dir>/ --size 64x64 --outline '#000000' --colors 16
 
 # 验收
