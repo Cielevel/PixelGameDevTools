@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""像素美术工具 CLI。子命令：check / anim / sheet / unsheet / gif / html / contact / onion / preview / swatch / from-image / quantize / diff / scale。
+"""像素美术工具 CLI。子命令：check / anim / sheet / unsheet / gif / html / contact / onion / preview / swatch / from-image / quantize / standardize / diff / scale。
 
 用法示例见同目录 README.md；各子命令 -h 查看参数。
 """
@@ -14,6 +14,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import anim
 import check as checkmod
 import palette as palmod
+import standardize as stdmod
 from PIL import Image
 
 
@@ -119,6 +120,53 @@ def cmd_quantize(args):
         dst = os.path.join(args.out, os.path.basename(f)) if out_is_dir else args.out
         out.save(dst)
         print("{}: {} 色 → 归板后 {} 色 → {}".format(os.path.basename(f), before, after, dst))
+    return 0
+
+
+def cmd_standardize(args):
+    """AI 像素图标准化：网格还原 + 单元鲁棒采样 + OKLab 量化（多输入共享网格与色板）。"""
+    files = _collect(args.inputs)
+    images = [Image.open(f).convert("RGBA") for f in files]
+    grid = args.grid if args.grid == "auto" else (
+        int(args.grid) if args.grid.isdigit() else args.grid)
+    bg = args.bg
+    if bg not in ("auto", "keep") and bg.startswith("#"):
+        bg = palmod.hex_to_rgb(bg)
+    palette = palmod.Palette.load(args.palette) if args.palette else None
+    if len(images) > 1:
+        outs, rep = stdmod.standardize_frames(
+            images, grid=grid, sampling=args.sampling, colors=args.colors,
+            palette=palette, bg=bg, bg_tol=args.bg_tol)
+        pairs = list(zip(files, outs))
+        cell = rep["grid_cell"]
+        gtxt = "{}x{}（共享）".format(*cell) if isinstance(cell, tuple) else str(cell)
+    else:
+        out, rep = stdmod.standardize(
+            images[0], grid=grid, sampling=args.sampling, colors=args.colors,
+            palette=palette, bg=bg, bg_tol=args.bg_tol)
+        pairs = [(files[0], out)]
+        outs = [out]
+        g = rep["grid"]
+        org = g.get("origin") or (0, 0)
+        gtxt = "{}x{}".format(*g["cell"])
+        if org != (0, 0):
+            gtxt += "@{},{}".format(*org)
+        gtxt += "（置信度 {}）".format(g["conf"]) if g.get("conf") is not None else "（手动）"
+    out_is_dir = len(pairs) > 1 or os.path.isdir(args.out) or args.out.endswith(("/", "\\"))
+    if out_is_dir:
+        os.makedirs(args.out, exist_ok=True)
+    dsts = []
+    for f, out in pairs:
+        dst = os.path.join(args.out, os.path.splitext(os.path.basename(f))[0] + "_std.png") \
+            if out_is_dir else args.out
+        out.save(dst)
+        dsts.append(dst)
+    bgtxt = "背景 {}→透明".format(palmod.rgb_to_hex(rep["bg"])) if rep.get("bg") else "背景保留"
+    print("[std] {} 张：网格 {} → {}x{}  {}  色数 {}　量化 {}".format(
+        len(files), gtxt, *outs[0].size, bgtxt, rep["colors_out"],
+        rep.get("quantize") or "-"))
+    for dst in dsts:
+        print("  → {}".format(dst))
     return 0
 
 
@@ -352,12 +400,27 @@ def main(argv=None):
     p.add_argument("--name", default=None)
     p.set_defaults(fn=cmd_from_image)
 
-    p = sub.add_parser("quantize", help="图像归入调色板 + alpha 两态化（结构性保色，导入/模仿路径用）")
+    p = sub.add_parser("quantize", help="图像归入调色板 + alpha 两态化（结构性保色，导入/模仿路径用；OKLab 感知色距最近色）")
     p.add_argument("inputs", nargs="+")
     p.add_argument("--palette", required=True, help="调色板 JSON")
     p.add_argument("-o", "--out", required=True, help="输出文件（单输入）或目录（多输入）")
     p.add_argument("--alpha-threshold", type=int, default=128)
     p.set_defaults(fn=cmd_quantize)
+
+    p = sub.add_parser("standardize",
+                       help="AI 像素图标准化：网格还原 + 单元鲁棒采样（众数/中位数）+ OKLab 量化；多输入自动共享网格与色板（防闪烁）")
+    p.add_argument("inputs", nargs="+", help="JPEG/PNG 等源图（AI 生成或放大图）；多输入视为动画帧")
+    p.add_argument("-o", "--out", required=True, help="输出文件（单输入）或目录（多输入，命名 <原名>_std.png）")
+    p.add_argument("--grid", default="auto",
+                   help="每格源像素数：auto（梯度峰距自动检测）| N（方格）| WxH；检测置信度不足时报错提示手动指定")
+    p.add_argument("--sampling", choices=("mode", "median"), default="mode",
+                   help="单元采样：mode=格内众数（默认，JPEG 噪声吸收）| median=逐通道中位数")
+    p.add_argument("--colors", type=int, default=16,
+                   help="目标色数（OKLab 加权 k-means，确定性）；0 = 不量化")
+    p.add_argument("--palette", help="映射到工程调色板 JSON（优先于 --colors）")
+    p.add_argument("--bg", default="auto", help="背景：auto（四角一致色判定）| keep | #rrggbb")
+    p.add_argument("--bg-tol", type=int, default=16, help="背景判定 RGB 距离容差")
+    p.set_defaults(fn=cmd_standardize)
 
     p = sub.add_parser("diff", help="像素级比对（一致 exit 0）：文件↔文件 或 目录↔目录（重构/改参零差异验证）")
     p.add_argument("a")

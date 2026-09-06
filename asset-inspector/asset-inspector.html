@@ -93,12 +93,29 @@
     <div class="row note">整数倍缩放适配：<span id="fitchk"></span></div>
 
     <h2>③ 处理与导出（对当前帧生效）</h2>
-    <div class="row">合并阈值 <input type="range" id="mthr" min="0" max="100" value="0" style="width:130px"> <span id="mthrv">0</span> <span class="note">RGB 距离，0=不合并</span></div>
+    <div class="row">合并阈值 <input type="range" id="mthr" min="0" max="100" value="0" style="width:130px"> <span id="mthrv">0</span>
+      <select id="mspace" title="合并距离的色彩空间">
+        <option value="rgb" selected>RGB</option>
+        <option value="oklab">OKLab</option>
+      </select> <span class="note">0=不合并</span></div>
+    <div class="row">量化色数 <select id="mk" title="OKLab 加权 k-means（确定性），在合并/缩格之后">
+      <option value="0" selected>不量化</option>
+      <option value="8">8</option><option value="16">16</option>
+      <option value="32">32</option><option value="64">64</option>
+    </select> <span class="note">感知色距聚类， JPEG 色噪收敛到干净色板</span></div>
     <div class="row">缩格 <select id="mscale">
       <option value="1" selected>不缩格</option>
       <option value="2">1/2</option><option value="4">1/4</option><option value="8">1/8</option>
       <option value="16">1/16</option><option value="32">1/32</option>
-    </select> <span class="note">最近邻，像素风大图先缩到逻辑网格</span></div>
+    </select>
+      <select id="msampling" title="缩格采样方式：众数/中位数按格统计，JPEG 噪声在缩格时被吸收（先网格后量化）">
+        <option value="mode" selected>众数</option>
+        <option value="median">中位数</option>
+        <option value="nearest">最近邻</option>
+      </select>
+      <button class="mini" id="detectGrid" title="亮度梯度自相关检测逻辑像素格距（范围 2–128）">检测网格</button></div>
+    <div class="row note" id="griddet">缩格采样默认众数（对 JPEG 色噪鲁棒）；「检测网格」自动估格距并填入缩格。</div>
+    <div class="row"><label><input type="checkbox" id="mbg" checked> 去背景（四角同色判定 + 边界连通清除；主体包住的同类色保留）</label></div>
     <div class="row"><label><input type="checkbox" id="malpha" checked> alpha 两态化（≥128→255，对齐工程门禁）</label></div>
     <div class="row">自动描边 <select id="omode">
       <option value="off" selected>关</option>
@@ -204,11 +221,13 @@ function verdict(a, threshold) {
 
 }
 
-/** 近似色合并（调色板量化的确定性变体：按占比排序 + RGB 距离阈值归并到代表色，
+/** 近似色合并（调色板量化的确定性变体：按占比排序 + 距离阈值归并到代表色，
  *  代表色 = 该簇中出现最多的色（众数），同一输入恒得同一输出）。
- *  threshold = RGB 欧氏距离上限（0 = 不合并）；alphaBin = alpha 两态化（≥128→255，其余→透明）。
+ *  threshold = RGB 欧氏距离上限（0 = 不合并）；space = 'rgb' | 'oklab'
+ *  （oklab 时 threshold 滑杆映射为 0–0.2 的感知色距）；
+ *  alphaBin = alpha 两态化（≥128→255，其余→透明）。
  *  返回 {width, height, data:Uint8ClampedArray}，可直接喂 analyzeImageData / putImageData。 */
-function mergeImageData(id, threshold, alphaBin) {
+function mergeImageData(id, threshold, alphaBin, space) {
   const w = id.width, h = id.height, src = id.data;
   if (threshold <= 0 && !alphaBin) return id;
   const counts = new Map();
@@ -218,22 +237,32 @@ function mergeImageData(id, threshold, alphaBin) {
     counts.set(key, (counts.get(key) || 0) + 1);
   }
   const sorted = Array.from(counts, ([k, n]) => ({ k, n })).sort((a, b) => b.n - a.n);
-  const reps = [];          // 代表色簇 {k, r, g, b}
+  const useLab = space === 'oklab';
+  const T = useLab ? (threshold / 100) * 0.2 : threshold;   // 感知色距上限 0–0.2
+  const labCache = new Map();                               // key → OKLab
+  const labOf = k => {
+    if (!labCache.has(k)) labCache.set(k, rgbToOklab((k >> 16) & 255, (k >> 8) & 255, k & 255));
+    return labCache.get(k);
+  };
+  const near = (k, rep) => useLab
+    ? oklabDist2(labOf(k), rep.lab) <= T * T
+    : (() => {
+        const dr = ((k >> 16) & 255) - rep.r, dg = ((k >> 8) & 255) - rep.g, db = (k & 255) - rep.b;
+        return dr * dr + dg * dg + db * db <= T * T;
+      })();
+  const reps = [];          // 代表色簇 {k, r, g, b, lab}
   const repOf = new Map();  // 色值 → 代表色值
-  const T2 = threshold * threshold;
   for (const { k } of sorted) {
     if (repOf.has(k)) continue;
     const r = (k >> 16) & 255, g = (k >> 8) & 255, b = k & 255;
-    let best = null, bestD2 = Infinity;
+    let best = null;
     if (threshold > 0) {
       for (const rep of reps) {
-        const dr = r - rep.r, dg = g - rep.g, db = b - rep.b;
-        const d2 = dr * dr + dg * dg + db * db;
-        if (d2 < bestD2) { bestD2 = d2; best = rep; }
+        if (near(k, rep)) { best = rep; break; }
       }
     }
-    if (best && bestD2 <= T2) repOf.set(k, best.k);
-    else { reps.push({ k, r, g, b }); repOf.set(k, k); }
+    if (best) repOf.set(k, best.k);
+    else { const rep = { k, r, g, b, lab: useLab ? rgbToOklab(r, g, b) : null }; reps.push(rep); repOf.set(k, k); }
   }
   const out = new Uint8ClampedArray(src.length);
   for (let i = 0; i < src.length; i += 4) {
@@ -243,6 +272,259 @@ function mergeImageData(id, threshold, alphaBin) {
     const key = repOf.get((src[i] << 16) | (src[i + 1] << 8) | src[i + 2]) || 0;
     out[i] = (key >> 16) & 255; out[i + 1] = (key >> 8) & 255; out[i + 2] = key & 255;
     out[i + 3] = alphaBin ? 255 : a;
+  }
+  return { width: w, height: h, data: out };
+}
+
+/* ─── OKLab 感知色空间（Björn Ottosson, 2020）：最近色/聚类距离比 RGB 欧氏更贴人眼 ─── */
+function rgbToOklab(r, g, b) {
+  const lin = c => { c /= 255; return c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4); };
+  const lr = lin(r), lg = lin(g), lb = lin(b);
+  const l = Math.cbrt(0.4122214708 * lr + 0.5363325363 * lg + 0.0514459929 * lb);
+  const m = Math.cbrt(0.2119034982 * lr + 0.6806995451 * lg + 0.1073969566 * lb);
+  const s = Math.cbrt(0.0883024619 * lr + 0.2817188376 * lg + 0.6299787005 * lb);
+  return [0.2104542553 * l + 0.7936177850 * m - 0.0040720468 * s,
+          1.9779984951 * l - 2.4285922050 * m + 0.4505937099 * s,
+          0.0259040371 * l + 0.7827717662 * m - 0.8086757660 * s];
+}
+const oklabDist2 = (a, b) => (a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2 + (a[2] - b[2]) ** 2;
+
+/* ─── 自动网格检测（对齐 pixel-toolkit/standardize.py）：
+ *  亮度梯度剖面 → 去均值自相关找主导周期（对精灵不跨满画布、格线缺过渡稳健）
+ *  → 半周期细分 → 相位（格内容起点）。conf = 周期自相关 / 剖面能量。 */
+function detectGridImageData(id, maxCell = 128, confMin = 0.35) {
+  const w = id.width, h = id.height, d = id.data;
+  const L = new Float64Array(w * h);
+  for (let i = 0, j = 0; i < d.length; i += 4, j++) {
+    L[j] = (d[i] * 19595 + d[i + 1] * 38470 + d[i + 2] * 7471) / 65536;
+  }
+  const profileX = new Float64Array(w);      // gx[x] = 列 x 与 x+1 的竖向平均 |ΔL|
+  for (let x = 0; x < w - 1; x++) {
+    let s = 0;
+    for (let y = 0; y < h; y++) s += Math.abs(L[y * w + x + 1] - L[y * w + x]);
+    profileX[x] = s / h;
+  }
+  const profileY = new Float64Array(h);
+  for (let y = 0; y < h - 1; y++) {
+    let s = 0;
+    for (let x = 0; x < w; x++) s += Math.abs(L[(y + 1) * w + x] - L[y * w + x]);
+    profileY[y] = s / w;
+  }
+  const MIN_CELL = 2;
+  const autocorr = (prof, n) => {
+    let mean = 0;
+    for (let i = 0; i < n; i++) mean += prof[i];
+    mean /= n;
+    let energy = 0;
+    const z = new Float64Array(n);
+    for (let i = 0; i < n; i++) { z[i] = prof[i] - mean; energy += z[i] * z[i]; }
+    energy /= n;
+    if (energy <= 1e-9) return { p: 0, conf: 0 };
+    const maxP = Math.min(maxCell, n >> 1);
+    if (maxP < MIN_CELL) return { p: 1, conf: 1 };
+    let bestP = MIN_CELL, bestS = -Infinity;
+    const scores = new Float64Array(maxP + 1);
+    for (let p = MIN_CELL; p <= maxP; p++) {
+      let s = 0;
+      for (let i = 0; i < n - p; i++) s += z[i] * z[i + p];
+      s /= (n - p);
+      scores[p] = s;
+      if (s > bestS) { bestS = s; bestP = p; }
+    }
+    let p = bestP;
+    while (p % 2 === 0 && p / 2 >= MIN_CELL && scores[p / 2] >= 0.7 * bestS) p /= 2;
+    return { p, conf: Math.max(0, scores[p] / energy) };
+  };
+  const phase = (prof, n, p) => {   // 边界相位 φ → 格内容起点 (φ+1)%p
+    let bestPhi = 0, bestS = -1;
+    for (let phi = 0; phi < p; phi++) {
+      let s = 0;
+      for (let x = phi; x < n; x += p) s += prof[x];
+      if (s > bestS) { bestS = s; bestPhi = phi; }
+    }
+    return (bestPhi + 1) % p;
+  };
+  const ax = autocorr(profileX, w), ay = autocorr(profileY, h);
+  if (!ax.p || !ay.p) return { ok: false, cellX: 0, cellY: 0, originX: 0, originY: 0, conf: 0 };
+  const conf = Math.min(ax.conf, ay.conf);
+  const ox = phase(profileX, w, ax.p), oy = phase(profileY, h, ay.p);
+  return { ok: conf >= confMin, cellX: ax.p, cellY: ay.p, originX: ox, originY: oy, conf: +conf.toFixed(2) };
+}
+
+/** 鲁棒缩格：按 denom 格距逐格取代表色（mode=格内众数 / median=逐通道中位数），
+ *  JPEG 块噪声在缩格时被统计吸收（对比：nearest 只取格内左上 1px，噪声直通）。
+ *  (ox,oy) 为格内容起点（检测网格给出的相位）。 */
+function downscaleImageData(id, denom, sampling, ox = 0, oy = 0) {
+  if (denom <= 1 || sampling === 'nearest') return id;
+  const w = id.width, h = id.height, src = id.data;
+  const cols = Math.max(1, Math.floor((w - ox) / denom));
+  const rows = Math.max(1, Math.floor((h - oy) / denom));
+  const out = new Uint8ClampedArray(cols * rows * 4);
+  const cell = new Uint8ClampedArray(denom * denom * 3);   // 格内像素缓冲（RGB）
+  for (let cy = 0; cy < rows; cy++) {
+    for (let cx = 0; cx < cols; cx++) {
+      let n = 0;
+      const x0 = ox + cx * denom, y0 = oy + cy * denom;
+      for (let dy = 0; dy < denom; dy++) {
+        let idx = ((y0 + dy) * w + x0) * 4;
+        for (let dx = 0; dx < denom; dx++, idx += 4) {
+          cell[n * 3] = src[idx]; cell[n * 3 + 1] = src[idx + 1]; cell[n * 3 + 2] = src[idx + 2];
+          n++;
+        }
+      }
+      let r, g, b;
+      if (sampling === 'median') {
+        const ch = v => { const a = Array.from({ length: n }, (_, i) => cell[i * 3 + v]); a.sort((p, q) => p - q); return n % 2 ? a[(n - 1) / 2] : (a[n / 2 - 1] + a[n / 2]) >> 1; };
+        r = ch(0); g = ch(1); b = ch(2);
+      } else {
+        // 众数分桶投票：按 8 级/通道分桶吸收 ±3 噪声（防平局摇摆），
+        // 胜桶均值后再做一次 ±5 邻域 mean-shift（桶窗口截断噪声分布，重收尾部去偏）
+        const sums = new Map();   // 桶 → [数量, ΣR, ΣG, ΣB]
+        for (let i = 0; i < n; i++) {
+          const j = i * 3;
+          const bk = (((cell[j] + 4) >> 3) << 10) | (((cell[j + 1] + 4) >> 3) << 5) | ((cell[j + 2] + 4) >> 3);
+          let e = sums.get(bk);
+          if (!e) sums.set(bk, e = [0, 0, 0, 0]);
+          e[0]++; e[1] += cell[j]; e[2] += cell[j + 1]; e[3] += cell[j + 2];
+        }
+        let bbk = -1, bn = 0;
+        for (const [bk, e] of sums) {
+          if (e[0] > bn || (e[0] === bn && bk < bbk)) { bn = e[0]; bbk = bk; }   // 平局取桶号小者（确定）
+        }
+        const bw = sums.get(bbk);
+        const core = [bw[1] / bw[0], bw[2] / bw[0], bw[3] / bw[0]];
+        let mr = 0, mg = 0, mb = 0, mn = 0;
+        for (let i = 0; i < n; i++) {
+          const j = i * 3;
+          const d = Math.max(Math.abs(cell[j] - core[0]), Math.abs(cell[j + 1] - core[1]), Math.abs(cell[j + 2] - core[2]));
+          if (d <= 5) { mr += cell[j]; mg += cell[j + 1]; mb += cell[j + 2]; mn++; }
+        }
+        r = Math.round(mr / mn); g = Math.round(mg / mn); b = Math.round(mb / mn);
+      }
+      const o = (cy * cols + cx) * 4;
+      out[o] = r; out[o + 1] = g; out[o + 2] = b; out[o + 3] = 255;
+    }
+  }
+  return { width: cols, height: rows, data: out };
+}
+
+/** 目标色数量化（对齐 pixel-toolkit standardize.build_palette_k）：
+ *  唯一色按占比降序 + 最远点初始化 + 加权 Lloyd（OKLab，确定性），
+ *  簇代表色取簇内最高频原色，最后 OKLab 最近色映射。 */
+function quantizeImageData(id, k, iters = 24) {
+  if (k <= 0) return id;
+  const w = id.width, h = id.height, src = id.data;
+  const counts = new Map();
+  for (let i = 0; i < src.length; i += 4) {
+    if (src[i + 3] === 0) continue;
+    const key = (src[i] << 16) | (src[i + 1] << 8) | src[i + 2];
+    counts.set(key, (counts.get(key) || 0) + 1);
+  }
+  if (counts.size <= k) return id;
+  const items = Array.from(counts, ([k2, n]) => ({ k: k2, n, lab: rgbToOklab((k2 >> 16) & 255, (k2 >> 8) & 255, k2 & 255) }))
+    .sort((a, b) => b.n - a.n || a.k - b.k);
+  const seeds = [items[0].lab];
+  const chosen = new Set([0]);
+  while (seeds.length < k) {
+    let bi = -1, bd = -1;
+    for (let i = 0; i < items.length; i++) {
+      if (chosen.has(i)) continue;
+      let d = Infinity;
+      for (const s of seeds) d = Math.min(d, oklabDist2(items[i].lab, s));
+      if (d > bd) { bd = d; bi = i; }
+    }
+    seeds.push(items[bi].lab);
+    chosen.add(bi);
+  }
+  const assign = new Array(items.length).fill(0);
+  for (let it = 0; it < iters; it++) {
+    let changed = false;
+    for (let i = 0; i < items.length; i++) {
+      let bj = 0, bd = Infinity;
+      for (let s = 0; s < seeds.length; s++) {
+        const d = oklabDist2(items[i].lab, seeds[s]);
+        if (d < bd) { bd = d; bj = s; }
+      }
+      if (bj !== assign[i]) { assign[i] = bj; changed = true; }
+    }
+    if (!changed) break;
+    for (let s = 0; s < seeds.length; s++) {
+      let tw = 0; const acc = [0, 0, 0];
+      for (let i = 0; i < items.length; i++) {
+        if (assign[i] !== s) continue;
+        tw += items[i].n;
+        acc[0] += items[i].lab[0] * items[i].n; acc[1] += items[i].lab[1] * items[i].n; acc[2] += items[i].lab[2] * items[i].n;
+      }
+      if (tw) seeds[s] = [acc[0] / tw, acc[1] / tw, acc[2] / tw];
+    }
+  }
+  const clusters = new Map();   // 簇 → [{k, n}]
+  for (let i = 0; i < items.length; i++) {
+    if (!clusters.has(assign[i])) clusters.set(assign[i], []);
+    clusters.get(assign[i]).push(items[i]);
+  }
+  const pal = [];
+  for (const members of clusters.values()) {
+    let best = members[0];
+    for (const m of members) if (m.n > best.n) best = m;   // 平局取排序在前者（占比降序已定）
+    pal.push(best.k);
+  }
+  const palLab = pal.map(k2 => ({ k: k2, lab: rgbToOklab((k2 >> 16) & 255, (k2 >> 8) & 255, k2 & 255) }));
+  const mapping = new Map();
+  for (const it of items) {
+    let bk = palLab[0], bd = Infinity;
+    for (const p of palLab) {
+      const d = oklabDist2(it.lab, p.lab);
+      if (d < bd) { bd = d; bk = p; }
+    }
+    mapping.set(it.k, bk.k);
+  }
+  const out = new Uint8ClampedArray(src.length);
+  for (let i = 0; i < src.length; i += 4) {
+    const a = src[i + 3];
+    if (a === 0) continue;
+    const key = mapping.get((src[i] << 16) | (src[i + 1] << 8) | src[i + 2]) || 0;
+    out[i] = (key >> 16) & 255; out[i + 1] = (key >> 8) & 255; out[i + 2] = key & 255;
+    out[i + 3] = a;
+  }
+  return { width: w, height: h, data: out };
+}
+
+/** 去背景（对齐 pixcli standardize --bg auto）：四角 2×2 均值一致 → 判定背景色，
+ *  只清除「从画布边界连通」的背景像素（RGB 距离 ≤ tol）——被主体包住的同类色
+ *  （如白底图上的白色高光）保留，不挖洞。四角不一致 → 原样返回。 */
+function removeBackground(id, tol = 16) {
+  const w = id.width, h = id.height, src = id.data;
+  const corner = (x, y) => {
+    let r = 0, g = 0, b = 0;
+    for (let dy = 0; dy < 2; dy++) for (let dx = 0; dx < 2; dx++) {
+      const i = (Math.min(y + dy, h - 1) * w + Math.min(x + dx, w - 1)) * 4;
+      r += src[i]; g += src[i + 1]; b += src[i + 2];
+    }
+    return [r / 4, g / 4, b / 4];
+  };
+  const corners = [corner(0, 0), corner(w - 2, 0), corner(0, h - 2), corner(w - 2, h - 2)];
+  const bg = corners[0];
+  if (corners.some(c => Math.max(Math.abs(c[0] - bg[0]), Math.abs(c[1] - bg[1]), Math.abs(c[2] - bg[2])) > 8)) {
+    return id;   // 四角不一致，无法可靠判定背景
+  }
+  const near = i => src[i + 3] !== 0 &&
+    (src[i] - bg[0]) ** 2 + (src[i + 1] - bg[1]) ** 2 + (src[i + 2] - bg[2]) ** 2 <= tol * tol;
+  const seen = new Uint8Array(w * h);
+  const stack = [];
+  for (let x = 0; x < w; x++) { stack.push(x, x + (h - 1) * w); }
+  for (let y = 0; y < h; y++) { stack.push(y * w, y * w + w - 1); }
+  const out = new Uint8ClampedArray(src);
+  while (stack.length) {
+    const p = stack.pop();
+    if (seen[p] || !near(p * 4)) continue;
+    seen[p] = 1;
+    out[p * 4 + 3] = 0;
+    const x = p % w, y = (p - x) / w;
+    if (x > 0) stack.push(p - 1);
+    if (x < w - 1) stack.push(p + 1);
+    if (y > 0) stack.push(p - w);
+    if (y < h - 1) stack.push(p + w);
   }
   return { width: w, height: h, data: out };
 }
@@ -724,8 +1006,9 @@ function init() {
     comp = { canvas, id };
   }
 
-  // ── ③ 处理与导出：合并 / 缩格 / 描边 / 笔刷 ──
-  function procActive() { return +$('mthr').value > 0 || +$('mscale').value > 1; }
+  // ── ③ 处理与导出：缩格（采样方式）→ 合并 → 量化 → 描边 / 笔刷 ──
+  function procActive() { return +$('mthr').value > 0 || +$('mscale').value > 1 || +$('mk').value > 0; }
+  let gridOrigin = { x: 0, y: 0 };   // 检测网格给出的格内容相位；手动改缩格即作废
   let procPending = false;
   function scheduleProc() {   // 滑杆拖动的 rAF 节流
     if (procPending) return;
@@ -741,8 +1024,13 @@ function init() {
       return;
     }
     const thr = +$('mthr').value, denom = +$('mscale').value, abin = $('malpha').checked;
+    const sampling = $('msampling').value, space = $('mspace').value, kq = +$('mk').value;
     let id;
-    if (denom > 1) {   // 最近邻缩格（imageSmoothing off 的整数缩小即最近邻采样）
+    if (denom > 1 && sampling !== 'nearest') {
+      // 鲁棒缩格：逐格众数/中位数（JPEG 噪声在缩格时被统计吸收）
+      const full = it.curId || frameToImageData(it.cur);
+      id = downscaleImageData(full, denom, sampling, gridOrigin.x, gridOrigin.y);
+    } else if (denom > 1) {   // 最近邻缩格（imageSmoothing off 的整数缩小即最近邻采样）
       const src = it.cur;
       const w = src.videoWidth || src.naturalWidth || src.width;
       const h = src.videoHeight || src.naturalHeight || src.height;
@@ -755,12 +1043,14 @@ function init() {
     } else {
       id = it.curId || frameToImageData(it.cur);
     }
-    const merged = mergeImageData(id, thr, abin);
+    if ($('mbg').checked) id = removeBackground(id, 16);
+    id = mergeImageData(id, thr, abin, space);
+    if (kq > 0) id = quantizeImageData(id, kq);
     const canvas = document.createElement('canvas');
-    canvas.width = merged.width; canvas.height = merged.height;
-    canvas.getContext('2d').putImageData(new ImageData(merged.data, merged.width, merged.height), 0, 0);
+    canvas.width = id.width; canvas.height = id.height;
+    canvas.getContext('2d').putImageData(new ImageData(id.data, id.width, id.height), 0, 0);
     const prev = proc;
-    proc = { canvas, id: merged, analysis: analyzeImageData(merged), threshold: thr, denom };
+    proc = { canvas, id, analysis: analyzeImageData(id), threshold: thr, denom, sampling, space, kq, bg: $('mbg').checked };
     if (prev && prev.denom !== denom) strokes.clear();   // 坐标空间变了，笔迹作废
     rebuildComp();
     renderMergePanel(proc.analysis);
@@ -770,7 +1060,7 @@ function init() {
   function renderMergePanel(a) {
     const sum = $('mersum'), tblEl = $('mertbl');
     if (!a) {
-      sum.textContent = '阈值 > 0 或选择缩格后启用：预览区与 ④ 色表切换为处理结果（当前显示原始帧）。';
+      sum.textContent = '阈值/量化色数 &gt; 0 或选择缩格后启用：预览区与 ④ 色表切换为处理结果（当前显示原始帧）。';
       tblEl.hidden = true; tblEl.textContent = '';
       $('expMerged').hidden = true;
       $('origdetails').open = true;
@@ -778,7 +1068,15 @@ function init() {
       return;
     }
     const orig = lastAnalysis ? lastAnalysis.colors.length : '—';
-    sum.innerHTML = '<p class="kv">合并后色数：<b>' + a.colors.length + '</b>（原 ' + orig + '）　尺寸：' + a.w + '×' + a.h + (proc.denom > 1 ? '（1/' + proc.denom + ' 缩格）' : '') + (omode !== 'off' ? '　含自动描边' : '') + (brushOn && strokes.size ? '　含笔迹 ' + strokes.size + ' px' : '') + '</p>';
+    const chain = [];
+    if (proc.denom > 1) chain.push('1/' + proc.denom + ' 缩格·' + { mode: '众数', median: '中位数', nearest: '最近邻' }[proc.sampling] +
+      (gridOrigin.x || gridOrigin.y ? '（相位 ' + gridOrigin.x + ',' + gridOrigin.y + '）' : ''));
+    if (proc.bg) chain.push('去背景');
+    if (proc.threshold > 0) chain.push('合并 ' + proc.threshold + (proc.space === 'oklab' ? '（OKLab）' : '（RGB）'));
+    if (proc.kq > 0) chain.push('量化 ' + proc.kq + ' 色（OKLab）');
+    sum.innerHTML = '<p class="kv">处理后色数：<b>' + a.colors.length + '</b>（原 ' + orig + '）　尺寸：' + a.w + '×' + a.h +
+      (chain.length ? '　' + chain.join(' → ') : '') +
+      (omode !== 'off' ? '　含自动描边' : '') + (brushOn && strokes.size ? '　含笔迹 ' + strokes.size + ' px' : '') + '</p>';
     tblEl.hidden = false; tblEl.textContent = '';
     tblEl.appendChild(colorTable(a, DISPLAY_CAP));
     if (a.colors.length > DISPLAY_CAP) {
@@ -807,7 +1105,11 @@ function init() {
     const it = files[cur];
     let base = stem();
     if (it && it.kind === 'gif' && it.curIdx >= 0) base += '_f' + String(it.curIdx).padStart(2, '0');
-    if (proc) base += '_q' + proc.threshold + (proc.denom > 1 ? '_d' + proc.denom : '');
+    if (proc) {
+      base += '_q' + proc.threshold;
+      if (proc.denom > 1) base += '_d' + proc.denom + ({ mode: 'm', median: 'med', nearest: '' }[proc.sampling] || '');
+      if (proc.kq > 0) base += '_c' + proc.kq;
+    }
     if (omode !== 'off') base += '_ol';
     if (brushOn && strokes.size) base += '_br';
     return base + '.png';
@@ -837,8 +1139,38 @@ function init() {
              toJson(proc.analysis.colors.map(c => c.hex)));
   };
   $('mthr').oninput = e => { $('mthrv').textContent = e.target.value; scheduleProc(); };
-  $('mscale').onchange = updateProc;
+  $('mscale').onchange = () => { gridOrigin = { x: 0, y: 0 }; updateProc(); };   // 手动改缩格，检测相位作废
+  $('msampling').onchange = updateProc;
+  $('mspace').onchange = updateProc;
+  $('mk').onchange = updateProc;
+  $('mbg').onchange = updateProc;
   $('malpha').onchange = updateProc;
+  $('detectGrid').onclick = () => {
+    const it = files[cur];
+    if (!it || !it.cur) { setStatus('先加载素材', true); return; }
+    const full = it.curId || frameToImageData(it.cur);
+    const det = detectGridImageData(full);
+    const el = $('griddet');
+    if (!det.ok || det.cellX <= 1) {
+      el.innerHTML = '<span class="no">未检出稳定网格（conf=' + det.conf + '）：可手动选缩格档位，或该图已是原生像素画</span>';
+      return;
+    }
+    gridOrigin = { x: det.originX, y: det.originY };
+    const denom = Math.max(det.cellX, det.cellY);
+    const sel = $('mscale');
+    const val = String(denom);
+    if (![...sel.options].some(o => o.value === val)) {   // 动态补档位（如 1/64）
+      const o = document.createElement('option');
+      o.value = val; o.textContent = '1/' + denom;
+      sel.appendChild(o);
+    }
+    sel.value = val;
+    el.innerHTML = '检出格距 <b>' + det.cellX + '×' + det.cellY + '</b> px（相位 ' + det.originX + ',' + det.originY +
+      '，置信度 ' + det.conf + '）→ 缩格 1/' + denom + '，输出约 ' +
+      Math.floor((full.width - det.originX) / denom) + '×' + Math.floor((full.height - det.originY) / denom) +
+      '；建议先缩格（众数）再合并/量化';
+    updateProc();
+  };
   $('omode').onchange = e => { omode = e.target.value; rebuildComp(); drawCurrent(files[cur]); };
   $('brush').onchange = e => { brushOn = e.target.checked; $('brushhint').hidden = !brushOn; drawCurrent(files[cur]); };
   $('clearStrokes').onclick = () => { strokes.clear(); drawCurrent(files[cur]); };
@@ -892,7 +1224,7 @@ function init() {
 const escapeHtml = s => String(s).replace(/[&<>"]/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[ch]));
 
 if (typeof document !== 'undefined' && document.getElementById('cv')) init();
-if (typeof module !== 'undefined' && module.exports) module.exports = { analyzeImageData, checkTiers, checkTile, checkScaleFit, verdict, hex6, mergeImageData, applyOutline };
+if (typeof module !== 'undefined' && module.exports) module.exports = { analyzeImageData, checkTiers, checkTile, checkScaleFit, verdict, hex6, mergeImageData, applyOutline, rgbToOklab, oklabDist2, detectGridImageData, downscaleImageData, quantizeImageData, removeBackground };
 </script>
 </body>
 </html>

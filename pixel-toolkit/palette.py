@@ -57,17 +57,61 @@ class Palette:
         return tuple(rgb)[:3] in self.colors
 
     def nearest(self, rgb):
-        rgb = tuple(rgb)[:3]
-        return min(
-            self.colors,
-            key=lambda c: (c[0] - rgb[0]) ** 2 + (c[1] - rgb[1]) ** 2 + (c[2] - rgb[2]) ** 2,
-        )
+        """最近色映射（OKLab 感知色距；2026-09-06 起 RGB 欧氏升级为感知色距）。"""
+        lab = rgb_to_oklab(rgb)
+        return min(self.colors, key=lambda c: oklab_dist2(lab, rgb_to_oklab(c)))
 
     def index(self, rgb):
         try:
             return self.colors.index(tuple(rgb)[:3])
         except ValueError:
             return -1
+
+
+# ---------------------------------------------------------------- OKLab ----
+# OKLab 感知色空间（Björn Ottosson, 2020）：最近色映射在 OKLab 空间做距离计算，
+# 比 RGB 欧氏更贴近人眼色差（交接包标准化流水线 Step 3 的映射规则）。
+
+def _srgb_to_lin(c):
+    c = c / 255.0
+    return c / 12.92 if c <= 0.04045 else ((c + 0.055) / 1.055) ** 2.4
+
+
+def _lin_to_srgb(v):
+    if v <= 0.0:
+        return 0
+    v = 12.92 * v if v <= 0.0031308 else 1.055 * (v ** (1 / 2.4)) - 0.055
+    return max(0, min(255, round(v * 255)))
+
+
+def rgb_to_oklab(rgb):
+    r, g, b = (_srgb_to_lin(c) for c in tuple(rgb)[:3])
+    l = 0.4122214708 * r + 0.5363325363 * g + 0.0514459929 * b
+    m = 0.2119034982 * r + 0.6806995451 * g + 0.1073969566 * b
+    s = 0.0883024619 * r + 0.2817188376 * g + 0.6299787005 * b
+    l_, m_, s_ = l ** (1 / 3), m ** (1 / 3), s ** (1 / 3)
+    return (
+        0.2104542553 * l_ + 0.7936177850 * m_ - 0.0040720468 * s_,
+        1.9779984951 * l_ - 2.4285922050 * m_ + 0.4505937099 * s_,
+        0.0259040371 * l_ + 0.7827717662 * m_ - 0.8086757660 * s_,
+    )
+
+
+def oklab_to_rgb(lab):
+    L, A, B = lab
+    l_ = L + 0.3963377774 * A + 0.2158037573 * B
+    m_ = L - 0.1055613458 * A - 0.0638541728 * B
+    s_ = L - 0.0894841775 * A - 1.2914855480 * B
+    l, m, s = l_ ** 3, m_ ** 3, s_ ** 3
+    return tuple(_lin_to_srgb(v) for v in (
+        4.0767416621 * l - 3.3077115913 * m + 0.2309699292 * s,
+        -1.2684380046 * l + 2.6097574011 * m - 0.3413193965 * s,
+        -0.0041960863 * l - 0.7034186147 * m + 1.7076147010 * s,
+    ))
+
+
+def oklab_dist2(a, b):
+    return (a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2 + (a[2] - b[2]) ** 2
 
 
 def count_colors(img):
@@ -86,11 +130,15 @@ def palette_from_image(img, max_colors=16):
 
 
 def quantize(img, palette):
-    """不透明像素归入调色板（精确命中优先，否则最近色）；alpha 保持两态。"""
+    """不透明像素归入调色板（精确命中优先，否则 OKLab 最近色）；alpha 保持两态。
+
+    唯一色 → 目标色的映射整表预计算（大图逐像素查表，避免重复距离计算）。
+    """
     src = img.convert("RGBA")
     out = Image.new("RGBA", src.size, (0, 0, 0, 0))
-    sp, op = src.load(), out.load()
     exact = {c: c for c in palette.colors}
+    mapping = {}
+    sp, op = src.load(), out.load()
     w, h = src.size
     for y in range(h):
         for x in range(w):
@@ -98,8 +146,12 @@ def quantize(img, palette):
             if a == 0:
                 continue
             c = (r, g, b)
-            c = exact.get(c) or palette.nearest(c)
-            op[x, y] = (c[0], c[1], c[2], 255)
+            t = exact.get(c)
+            if t is None:
+                if c not in mapping:
+                    mapping[c] = palette.nearest(c)
+                t = mapping[c]
+            op[x, y] = (t[0], t[1], t[2], 255)
     return out
 
 
