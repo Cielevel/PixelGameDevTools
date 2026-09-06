@@ -207,18 +207,14 @@ function centroidStats(id) {
   return { count:n, centroid: n ? [sx/n, sy/n] : null };
 }
 
-/* 主体放置到输出画布：不改变主体像素大小，画布 cw×ch。
-   锚定测度用【形心】（参考形心优先）：把主体质量中心对齐到画布中心 + dx/dy。
-   refCentroid 为全帧共享参考形心（可选，缺省用该帧形心）——
-   四肢摆动改变 bbox 但几乎不动形心 → 主体位置稳定、动作内容保留。 */
-function placeOnCanvas(img, cw, ch, dx, dy, refCentroid) {
+/* 主体放置到输出画布：不做行为锚定——源帧位置本身亚像素稳定（实测降采样后 X 极差 0.21px、
+   Y 极差 0.68px）；任何逐帧形心/bbox 对齐反而把亚像素波动圆整成 ±1px 台阶，制造假抖动。
+   直接按固定偏移贴画布中心（仅保留 dx/dy 手动位移）。 */
+function placeOnCanvas(img, cw, ch, dx, dy, anchor) {
   const out = new Uint8ClampedArray(cw*ch*4);
-  const cs = centroidStats(img);
-  if (!cs.centroid) return { width:cw, height:ch, data:out };
-  const cx = refCentroid ? refCentroid[0] : cs.centroid[0];
-  const cy = refCentroid ? refCentroid[1] : cs.centroid[1];
-  const ox = Math.round(cw/2 - cx + (dx|0));
-  const oy = Math.round(ch/2 - cy + (dy|0));
+  // 主体（降采样后的帧即主体尺寸帧）整体贴画布中心：偏移 = (画布-主体)/2 + dx/dy
+  const ox = Math.round((cw - img.width)/2) + (dx|0);
+  const oy = Math.round((ch - img.height)/2) + (dy|0);
   for (let y=0;y<img.height;y++) for (let x=0;x<img.width;x++) {
     const i=(y*img.width+x)*4;
     if (!img.data[i+3]) continue;
@@ -480,17 +476,27 @@ function processAll(frames) {
   const key = $('key').value;
   const ow=Math.max(1,+$('ow').value||64), oh=Math.max(1,+$('oh').value||64);
 
-  // ① 参考形心（已无需跨帧——形心对内容变化不敏感，逐帧对齐即可；见下）
+  // ① 全帧合并参考框（固定裁剪窗，帧间一致）：抠像后遍历全部帧取内容 bbox 并集 + 边距
+  let ref = null;
+  for (const f of frames) {
+    const im = { width:f.width, height:f.height, data:new Uint8ClampedArray(f.data) };
+    const img = (key === 'green' || (key === 'auto' && detectGreen(im))) ? chromaKey(im) : im;
+    const b = alphaStats(img).bbox;
+    if (!b) continue;
+    ref = ref ? [Math.min(ref[0],b[0]), Math.min(ref[1],b[1]), Math.max(ref[2],b[2]), Math.max(ref[3],b[3])] : b;
+  }
+  if (!ref) ref = [0, 0, frames[0].width-1, frames[0].height-1];
+  const M = Math.round(Math.max(8, (ref[2]-ref[0])*0.02));   // 边距 ~2%（防边缘裁切、留呼吸）
+  ref = [Math.max(0,ref[0]-M), Math.max(0,ref[1]-M), ref[2]+M, ref[3]+M];
 
-  // 每帧：抠像 → 等比降采样 → 形心对齐画布中心
-  // 形心（质量中心）对四肢摆动不敏感（真实 walk 帧实测形心间隔差仅 ~1.7px，bbox 中心达 ~9px），
-  // 用【该帧自身形心】对齐即可：主体稳定、动作内容保留；无需跨帧参考（省去坐标换算）。
+  // ② 每帧：抠像 → 固定参考框裁剪（帧间窗口一致，主体位置天然稳定）→ 等比缩放到主体尺寸 → 贴画布中心
   const raw = [];
   for (const f of frames) { const im = { width:f.width, height:f.height, data:new Uint8ClampedArray(f.data) };
     let img = im;
     if (key === 'green' || (key === 'auto' && detectGreen(img))) img = chromaKey(img);
+    img = cropToBox(img, ref);
     img = downsampleContain(img, ow, oh, fit);
-    img = placeOnCanvas(img, cw, ch, dx, dy);   // 用每帧自身形心（降采样后坐标系）
+    img = placeOnCanvas(img, cw, ch, dx, dy);   // 不做形心锚定（源位置亚像素稳定，锚定反而制造台阶抖动）
     raw.push(img);
   }
   const outline = $('outline').checked, ocol = $('outlineColor').value;
