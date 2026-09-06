@@ -181,14 +181,17 @@ def cmd_video_std(args):
         bg_tol=args.bg_tol, colors=args.colors, palette=args.palette,
         outline=args.outline, make_gif=not args.no_gif, make_html=not args.no_html,
         keep_frames=not args.no_frames, grid=args.grid, sampling=args.sampling,
-        bg=args.bg)
-    print("[video-std] {} {}x{} {}fps {} → {} 帧 {}".format(
+        bg=args.bg, key=args.key)
+    print("[video-std] {} {}x{} {}fps {} → {} 帧 {}（{}）".format(
         os.path.basename(args.video), rep["width"], rep["height"], rep["fps"],
         rep["codec"], rep["frames_used"],
-        "裁剪{}".format(rep["crop"]) if rep.get("crop") else "不裁剪"))
+        "裁剪{}".format(rep["crop"]) if rep.get("crop") else "不裁剪",
+        "绿幕抠像" if rep.get("key") else "非绿幕"))
     print("  → {}".format(rep["out"]))
-    print("  → 量化: {}；输出色数 {}".format(
-        rep.get("quantize") or "-", rep.get("colors_out")))
+    co = rep.get("colors_out") or []
+    detail = "{}..{}".format(co[0], co[-1]) if len(co) > 3 else co
+    print("  → 量化: {}；输出色数 {}（{} 帧）".format(
+        rep.get("quantize") or "-", detail, len(co)))
     return 0
 
 
@@ -460,6 +463,8 @@ def main(argv=None):
     p.add_argument("--box", default=None, help="固定裁剪框 x0,y0,x1,y1（配合 --crop fixed）")
     p.add_argument("--bg-tol", type=int, default=60, help="背景判定亮度差阈值")
     p.add_argument("--bg", default="auto", help="背景透明化：auto（四角众数判定，默认）| keep（不透明化）| #rrggbb")
+    p.add_argument("--key", choices=("auto", "green", "none"), default="auto",
+                   help="绿幕抠像：auto（四角检测到绿幕则抠像）| green（强制）| none（不用）；色度判定不受灰衣影响")
     p.add_argument("--colors", type=int, default=16, help="目标色数（跨帧合并聚类）；0=不量化")
     p.add_argument("--palette", help="映射到工程调色板 JSON（优先于 --colors）")
     p.add_argument("--grid", default=None, help="指定逻辑网格 N（仅当视频确为网格放大时；默认 None=像素化降采样）")

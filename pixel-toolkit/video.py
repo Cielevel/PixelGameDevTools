@@ -133,9 +133,10 @@ def downsample_average(im, tw, th):
     """面积平均降采样到 tw×th（无网格时的平滑像素化；防摩尔纹）。
 
     与 nearest（丢信息）/ 网格采样（无网格不适用）不同，平均法保留每格主色。
-    输出 RGBA（alpha=255）供量化/描边管线直接消费。
+    输入可带 alpha（绿幕抠像后）：透明像素不参与色平均；
+    输出 alpha 两态化 —— 格内不透明占比 ≥1/2 → 不透明（取不透明像素均值），否则透明。
     """
-    im = im.convert("RGB")
+    im = im.convert("RGBA")
     w, h = im.size
     out = Image.new("RGBA", (tw, th))
     po, pi = out.load(), im.load()
@@ -150,12 +151,16 @@ def downsample_average(im, tw, th):
             for yy in range(y0, y1):
                 for xx in range(x0, x1):
                     c = pi[xx, yy]
+                    if c[3] == 0:
+                        continue
                     r += c[0]
                     g += c[1]
                     b += c[2]
                     n += 1
             if n:
                 po[tx, ty] = (r // n, g // n, b // n, 255)
+            else:
+                po[tx, ty] = (0, 0, 0, 0)
     return out
 
 
@@ -168,6 +173,59 @@ def downsample_nearest(im, tw, th):
         # 非整数倍：用面积平均兜底（避免最近邻取点偏移产生锯齿）
         return downsample_average(im, tw, th)
     return im.convert("RGBA").resize((tw, th), Image.NEAREST)
+
+
+# ------------------------------------------------------------ 绿幕抠像 ----
+def is_greenish(rgb, gain=1.1):
+    """色度特征：绿色通道显著高于 R/B（绿幕绿）。阈值为经验值，适配 (20,180,40) 类绿幕。"""
+    r, g, b = rgb[0], rgb[1], rgb[2]
+    return g > 60 and g > r * gain and g > b * gain
+
+
+def detect_green_screen(im):
+    """检测图像是否为绿幕背景（四角众数是否绿）。返回幕色 (r,g,b) 或 None。"""
+    im = im.convert("RGB")
+    px = im.load()
+    w, h = im.size
+    from collections import Counter
+    corners = [px[0, 0], px[w - 1, 0], px[0, h - 1], px[w - 1, h - 1]]
+    bg = Counter(corners).most_common(1)[0][0]
+    return bg if is_greenish(bg) else None
+
+
+def chroma_key(im, bg_rgb=None, green_gain=1.1, soft=0.0):
+    """绿幕抠像：绿色背景像素转 alpha=0（按色度判定，与亮度无关——灰衣灰身不受影响）。
+
+    bg_rgb：绿幕参考色（None 时自动检测四角；检测不到绿幕则原样返回）。
+    green_gain：绿判定增益（G > R*增益 且 G > B*增益）。
+    soft：边缘软化系数 0~1（0=两态硬边，默认；>0 使接近绿的像素渐变透明，用于防边缘绿溢）。
+    返回 RGBA 图。
+    """
+    im = im.convert("RGBA")
+    px = im.load()
+    w, h = im.size
+    if bg_rgb is None:
+        bg_rgb = detect_green_screen(im)
+        if bg_rgb is None:
+            return im
+    br, bg_, bb = bg_rgb
+    # 以幕色为基准的"绿度"：G 超出 R/B 预期幅度的量
+    for y in range(h):
+        for x in range(w):
+            r, g, b, a = px[x, y]
+            if a == 0:
+                continue
+            # 相对幕色饱和度：G 远高于 R/B（差距至少 40 且 G>R*1.15）
+            if g > 60 and g > r * green_gain and g > b * green_gain \
+                    and (g - r) > 40 and (g - b) > 40:
+                if soft > 0:
+                    # 软化：按绿距离线性插值 alpha（保留角色边缘的绿溢过渡）
+                    dist = min((g - r), (g - b)) - 40
+                    t = max(0.0, min(1.0, dist / (40 * soft)))
+                    px[x, y] = (0, 0, 0, int(255 * (1 - t)))
+                else:
+                    px[x, y] = (0, 0, 0, 0)
+    return im
 
 
 # ------------------------------------------------------------ 背景清除 ----
@@ -216,7 +274,8 @@ def remove_bg_connected(im, bg_rgb=None, tol=24, bg_tol=None):
 def video_standardize(video, out, *, fps=None, size=None, crop="auto",
                       box=None, bg_tol=60, colors=16, palette=None,
                       outline=None, make_gif=True, make_html=True,
-                      keep_frames=True, grid=None, sampling="mode", bg="auto"):
+                      keep_frames=True, grid=None, sampling="mode", bg="auto",
+                      key="auto"):
     """视频标准化主流程。返回 report dict。
 
     size: 目标像素尺寸 (tw,th)；None=不缩放（仅量化）。
@@ -225,6 +284,8 @@ def video_standardize(video, out, *, fps=None, size=None, crop="auto",
     grid: 若指定（如 4），走 standardize.grid 采样路径（仅当视频确为网格放大时）；
           默认 None = 像素化降采样路径（AI 动态视频推荐）。
     outline: 描边色 (r,g,b) 或 None（不描边）。
+    key: 'auto'|'green'|'none'；green=绿幕抠像（色度判定，原始分辨率做，灰衣不误删）；
+         auto=四角检测到绿幕则抠像；none=不做。
     """
     import tempfile
     rep = {"video": video}
@@ -235,17 +296,46 @@ def video_standardize(video, out, *, fps=None, size=None, crop="auto",
     rep["extracted"] = len(frames)
     rep["fps"] = fps or probe["fps"]
 
+    # 绿幕抠像（原始分辨率、色度判定；抠像后内容 bbox 用 alpha 而非颜色差）
+    keyed = False
+    if key in ("auto", "green"):
+        from PIL import Image as _IM
+        im0 = _IM.open(frames[0])
+        if detect_green_screen(im0) is not None or key == "green":
+            frames = [chroma_key(_IM.open(p)) for p in frames]
+            keyed = True
+    if keyed:
+        rep["key"] = "green"
+    else:
+        rep["key"] = None
+    # 抠像后按 alpha 计算全程 bbox（无颜色差误判）
+    alpha_bbox = None
+    if keyed and crop == "auto" and box is None:
+        from collections import deque
+        xs, ys = [], []
+        for f in frames:
+            px = f.load()
+            w, h = f.size
+            for y in range(0, h, 2):
+                for x in range(0, w, 2):
+                    if px[x, y][3] > 0:
+                        xs.append(x)
+                        ys.append(y)
+        if xs:
+            alpha_bbox = (min(xs), min(ys), max(xs), max(ys))
+            box = alpha_bbox
+            rep["crop_from"] = "alpha"
+
     # 裁切
-    if crop == "auto" and box is None:
+    if crop == "auto" and box is None and not keyed:
         bb = merged_content_bbox(frames, bg_tol=bg_tol)
         if bb:
             box = bb
     if box and crop in ("auto", "fixed"):
         x0, y0, x1, y1 = box
-        frames = [Image.open(p).convert("RGB").crop((x0, y0, x1 + 1, y1 + 1)) for p in frames]
+        frames = [f.crop((x0, y0, x1 + 1, y1 + 1)) for f in frames]
         rep["crop"] = box
     else:
-        frames = [Image.open(p).convert("RGB") for p in frames]
         rep["crop"] = None
 
     # 缩放：网格路径 or 像素化路径
@@ -263,13 +353,13 @@ def video_standardize(video, out, *, fps=None, size=None, crop="auto",
             outs = [downsample_average(f, tw, th) for f in frames]
         else:
             outs = [f.convert("RGBA") for f in frames]
-        # 背景透明化（量化的主体：不把背景色算进色板；连通清除保主体包住的高光）
-        # 背景色高度一致（原视频深灰/白底），容差取 24（RGB 分量差 24）；bbox 判定 60 是主体/背景分离阈值不要混用
-        if bg == "auto":
-            outs = [remove_bg_connected(f, bg_tol=24) for f in outs]
-        elif bg and bg != "keep":
-            from palette import hex_to_rgb
-            outs = [remove_bg_connected(f, bg_rgb=hex_to_rgb(bg), bg_tol=24) for f in outs]
+        # 背景透明化：绿幕已抠像（alpha 两态，跳过）；非绿幕才做连通清除（与背景色接近，容差 24）
+        if not keyed:
+            if bg == "auto":
+                outs = [remove_bg_connected(f, bg_tol=24) for f in outs]
+            elif bg and bg != "keep":
+                from palette import hex_to_rgb
+                outs = [remove_bg_connected(f, bg_rgb=hex_to_rgb(bg), bg_tol=24) for f in outs]
         srep = {"colors_out": [None] * len(outs)}
         # 跨帧共享色板量化
         if palette:
