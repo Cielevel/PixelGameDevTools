@@ -14,7 +14,6 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import anim
 import check as checkmod
 import palette as palmod
-from canvas import Canvas
 from PIL import Image
 
 

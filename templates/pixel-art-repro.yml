@@ -39,7 +39,7 @@ jobs:
       - name: 全量重跑生成脚本
         run: |
           set -e
-          for f in tools/pixelart/gen_*.py; do
+          for f in tools/pixelart/generation/gen_*.py; do
             echo ":: $f"
             python "$f" > /dev/null
           done

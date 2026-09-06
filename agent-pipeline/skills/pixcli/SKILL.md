@@ -67,5 +67,5 @@ python tools/pixelart/pixcli.py diff a.png b.png
 ## 更多
 
 - 完整参数与生成脚本骨架：`tools/pixelart/README.md`
-- 风格基准库（明暗/剪影/眼神光惯例）：`tools/pixelart/style_kit.py`；各资产生成脚本 `tools/pixelart/gen_*.py`
+- 风格基准库（明暗/剪影/眼神光惯例）：`tools/pixelart/generation/style_kit.py`；各资产生成脚本 `tools/pixelart/generation/gen_*.py`
 - 资产目录前缀映射：`tools/pixelart/layout.py`（按工作区清单修订）

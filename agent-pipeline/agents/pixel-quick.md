@@ -29,8 +29,8 @@ tools: [Read, Write, Edit, Bash, TodoWrite]
 - 交付时给出候选新色清单（hex + 用途），供日后定案入板一次到位
 
 ## 工作流
-1. 读参考图/描述与既有基准资产（比例、头身、明暗惯例参照 `tools/pixelart/style_kit.py`；技法对照 `docs/像素法则.md` 条目）
-2. 写一次性脚本到 scratch 目录，**复用** `tools/pixelart/canvas.py` 与 `style_kit.py` 导出的基元（`paint`/`tube`/`rows_to_set`/`line_pts`），部件画法单源复用、不复制进 scratch 脚本
+1. 读参考图/描述与既有基准资产（比例、头身、明暗惯例参照 `tools/pixelart/generation/style_kit.py`；技法对照 `docs/像素法则.md` 条目）
+2. 写一次性脚本到 scratch 目录，**复用** `tools/pixelart/generation/canvas.py` 与 `style_kit.py` 导出的基元（`paint`/`tube`/`rows_to_set`/`line_pts`），部件画法单源复用、不复制进 scratch 脚本
 3. 生成原生 PNG + ×8 预览，跑 `pixcli check` 直至 exit 0
 4. 目视自检 **≤2 轮**：每轮只 Read 一张 ×8 预览，优先修剪影可读性（轮廓特征/发型剪影/大色块分区/接地），其次特征还原；仍未收敛即如实报告已知问题交用户定夺——这是快测，不做无限打磨
 5. 交付报告：文件清单、bbox/中心/接地像素/色数、候选新色清单、已知取舍（相对参考图丢了什么）、复现命令

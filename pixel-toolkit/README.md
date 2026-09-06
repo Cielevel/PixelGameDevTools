@@ -14,15 +14,14 @@
 
 ## 组成
 
-| 文件 | 职责 |
+| 文件 / 目录 | 职责 |
 | --- | --- |
-| `canvas.py` | 像素画布与绘制基元：`px / hline / vline / line / rect / ellipse / ellipse_outline / outline_in（闭合内描边）/ outline_out / mirror_left_to_right / shift / paste / replace_color`，逐像素、无抗锯齿 |
+| `generation/` | **纯程序化生成素材方案**（独立类别）：`canvas.py` 绘制基元 / `style_kit.py` 风格基准库 / `gen_*.py` 资产生成脚本（`gen_slime_idle.py` 骨架范例）；类别总纲、脚本约定与骨架见其 `README.md`，后续「纯程序验证素材」功能将与此类别并列 |
 | `palette.py` | 调色板 JSON 读写（`assets/palettes/`）、最近色映射、`quantize` 归入色板、`enforce_alpha` 两态化、色条 PNG 导出 |
 | `anim.py` | 序列帧 I/O、sprite sheet 拼合/切分、GIF 导出、自包含 HTML 播放器、放大逐帧检查图（可叠像素网格坐标）、洋葱皮静态检查图 |
 | `check.py` | 程序化自检：尺寸 / 模式 / alpha 两态 / 色数 / 调色板 / 帧组脚底与水平中心对齐 / 动画一致性（死帧 P1、跳变与循环突断 P2）/ 孤立像素 / 连通域计数（默认信息，`--components-max` 升门禁）；帧组按文件名前缀自动聚合，整目录混检互不误报；另提供 `frame_stats` 动画统计（不设门禁） |
-| `style_kit.py` | **风格基准库**（源自 `slime_idle` 定案）：轮廓偏移法明暗带、穹顶剪影、高光团、眼神光惯例；新资产优先复用，只改几何与配色参数 |
+| `layout.py` | sprites 子目录布局约定：按资产名前缀映射子目录（`sprite_dir`），前缀表按工程清单修订 |
 | `pixcli.py` | 命令行入口 |
-| `gen_*.py` | 各资产的生成脚本（可复现、可批量改色改参） |
 
 ## 常用命令
 
@@ -70,26 +69,9 @@ python3 tools/pixelart/pixcli.py from-image some.png -o assets/palettes/new.json
 python3 tools/pixelart/pixcli.py scale assets/sprites/base/foo.png -o /tmp/foo_x8.png --factor 8
 ```
 
-## 生成脚本骨架
+## 生成脚本
 
-```python
-import os
-import sys
-
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-
-import style_kit                              # 风格基准库（明暗/剪影/眼神光惯例）
-from canvas import Canvas
-from palette import Palette
-
-pal = Palette.load("assets/palettes/slime.json").roles
-rows, y_top = style_kit.body_rows(15.5, 22, 14, 4, 8, ground_y=31)
-c = Canvas(32, 32)
-style_kit.shade_body(c, rows, y_top, 15.5, pal)      # 光源左上标准明暗
-style_kit.highlight_blob(c, 15.5, y_top, 11.0, 14, pal)
-c.outline_in(pal["outline"])                          # 闭合一 px 内描边
-c.save("out.png")
-```
+生成脚本（`gen_*.py`）一律落 `generation/` 目录——脚本落位、颜色先入板、一源双产出、可复现验收（重跑零差异）等约定与代码骨架，见 [`generation/README.md`](generation/README.md)。
 
 ## 约定
 

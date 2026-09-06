@@ -9,7 +9,7 @@
 
 用法约定：颜色一律取自角色调色板 `Palette.load(...).roles`（先入板再使用）；
 绘制收尾统一 `Canvas.outline_in(roles["outline"])` 形成 1px 闭合内描边。
-参考实现：`tools/pixelart/gen_slime_idle.py`。新怪物以既有资产为模板，
+参考实现：同目录 `gen_slime_idle.py`。新怪物以既有资产为模板，
 只改几何与配色参数，不另发明明暗模型。
 """
 from __future__ import annotations

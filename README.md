@@ -7,7 +7,7 @@
 
 | 目录 | 内容 |
 |---|---|
-| `pixel-toolkit/` | pixcli 像素美术 CLI 与核心库（Python 3 + Pillow，唯一第三方依赖）：`canvas`（逐像素绘制基元，无抗锯齿）/ `palette`（调色板 JSON、量化归板、alpha 两态）/ `anim`（帧 IO、sprite sheet 拼切、GIF/自包含 HTML 播放器、洋葱皮检查图）/ `check`（程序化门禁：尺寸/alpha/色数/对齐/动画一致性/连通域）/ `layout`（sprites 子目录布局约定）/ `style_kit`（明暗与造型风格基准库）；`README.md` 为完整命令文档；`examples/gen_slime_idle.py` 为生成脚本骨架范例 |
+| `pixel-toolkit/` | pixcli 像素美术 CLI 与核心库（Python 3 + Pillow，唯一第三方依赖）。共用基础库：`palette`（调色板 JSON、量化归板、alpha 两态）/ `anim`（帧 IO、sprite sheet 拼切、GIF/自包含 HTML 播放器、洋葱皮检查图）/ `check`（程序化门禁：尺寸/alpha/色数/对齐/动画一致性/连通域）/ `layout`（sprites 子目录布局约定）；`generation/` 为**纯程序化生成素材方案**独立类别（`canvas` 逐像素绘制基元 / `style_kit` 明暗与造型风格基准库 / `gen_*.py` 生成脚本，骨架范例 `gen_slime_idle.py`）——后续「纯程序验证素材」功能将与此类别并列；`README.md` 为完整命令文档 |
 | `scene-previewer/` | 场景预览台（纯静态单 HTML，双击即用）：tilemap + sprite 摆位、分层帧动画（本体层+配件层同钟合成）播放、整数倍最近邻缩放、踩格线——素材「游戏内比例实感」的正式视检环境，避免放大看图的认知偏差；底部 SCENE 数据即接入点 |
 | `agent-pipeline/` | ZCode 多 agent 像素美术流水线（8 个 agent + shared 公共基线）：artist/reviewer 效率版与全量版、loop-reviewer（循环动画专项）、imitator+reviewer（有源参考的模仿绘制）、quick（形象设计快稿）；`shared/` 收拢共同约定（像素资产约定/技法纪律/审查框架），**agent 定义只含各自差量，改基准只改 AGENTS.md 一处**；外加 pixcli skill（工具速查与门禁判读） |
 | `asset-packs/` | 已购第三方模板资产包（只读参考，「借动作不借皮」的源库）：`top-down-asset-pack/`（俯视 64×64 格动作包，idle/walk/run/attack × 8 朝向）、`2d-pixel-art-character-template/`（48×48 侧视动作模板包）；规格与许可边界见包内 README |
@@ -23,13 +23,13 @@
 2. 模板包按需取用：`asset-packs/` 所需包拷贝（或软链）到新工程 `assets/template/`，imitator 系 agent 从该路径取源
 3. 按 `templates/` 落 `.gitattributes` / `.gitignore`；需要 CI 资产门禁时启用 `templates/pixel-art-repro.yml`
 4. 在新工程 `AGENTS.md` 里定基准（tile 像素密度 / 尺寸档位 / 视角与朝向 / 帧数指引 / 调色板与目录 / 画面方向）——这是 shared 约定、`layout.py` 前缀映射、各 agent 审查单与 CI 门禁的**唯一基准输入；改基准只改 AGENTS.md 一处**
-5. 首个风格基准资产（建议从 slime 类软体圆物起步）定案后，把明暗造型参数沉淀进 `style_kit.py`，后续资产全部复用
+5. 首个风格基准资产（建议从 slime 类软体圆物起步）定案后，把明暗造型参数沉淀进 `generation/style_kit.py`，后续资产全部复用
 
 ## 适配清单（项目耦合点）
 
 - **`pixel-toolkit/layout.py`**：前缀映射表（player/npc/mob/bullet/fx/pickup/icon/base）为通用起步默认，按新工程资产清单修订 docstring 与映射表
 - **`scene-previewer/scene.html`**：底部 SCENE 数据为最小示例占位（指向不存在的资产会显示加载失败），接入时替换为目标工程资产路径
-- **`pixel-toolkit/examples/gen_slime_idle.py`**：生成脚本骨架范例（调色板先入板、重跑=资产、一源双产出的写法示范），输出路径按新工程调整
+- **`pixel-toolkit/generation/`**：生成脚本一律落部署后的 `tools/pixelart/generation/`；`gen_slime_idle.py` 为骨架范例（调色板先入板、重跑=资产、一源双产出的写法示范），输出路径按新工程调整
 - **`templates/pixel-art-repro.yml`**：触发 paths 与 `assets/sprites/*/` 门禁循环按新工程目录调整
 - **`asset-packs/`**：第三方购买资产，对外再分发边界以购买渠道条款为准
 

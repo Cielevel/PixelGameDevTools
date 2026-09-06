@@ -23,7 +23,7 @@ tools: [Read, Bash]
 1. 规格：尺寸符合工作区 `AGENTS.md` 档位或派发规格；模式 RGBA；背景透明；帧尺寸一致
 2. 命名与目录：序列帧/sheet 命名与落位符合 shared/像素资产约定 与工作区约定
 3. 程序化复核：`pixcli check` exit 0（含动画一致性：死帧 P1、跳变/循环突断 P2）；不透明 bbox 逐帧比对——接地帧 bottom 恒等于锚点行、组内水平中心漂移 ≤1px 量级；色数达标且全部来自工程色板；`pixcli anim` 对比源与输出的运动规格（相邻/循环 diff 率、面积序列应与源同量级，偏差即动作失真的量化证据）
-4. 边界核查：源素材库（`asset-packs/` 或派发指定参考路径）无任何写入；未覆盖既有资产文件；生成脚本已落 `tools/pixelart/`
+4. 边界核查：源素材库（`asset-packs/` 或派发指定参考路径）无任何写入；未覆盖既有资产文件；生成脚本已落 `tools/pixelart/generation/`
 
 ## 检查手段
 - Read 三方可视比对：源帧、输出帧、工程参照帧（可用 `pixcli contact`/`unsheet` 产物；小图/局部用 Python nearest 放大导出**系统临时目录**再 Read）

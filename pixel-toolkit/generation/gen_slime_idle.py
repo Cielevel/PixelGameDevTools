@@ -6,12 +6,12 @@
 （重跑 = 资产，配合 pixcli diff 做零差异验证）。输出路径按目标工程调整。
 
 规范：32x32、RGBA、alpha 两态、光源左上、1px 闭合内描边。
-明暗/造型模型复用 tools/pixelart/style_kit.py（风格基准库）。
+明暗/造型模型复用同目录 style_kit.py（风格基准库）。
 动画：squash & stretch 呼吸/弹性循环（压扁蓄力 → 回弹拉伸 → 顶点 → 回落 →
 二次小压扁 → 回中），底边始终贴地（bbox bottom 恒为 y=31）、水平中心恒为 x=15.5，
 体积守恒（压扁变宽、拉伸变窄）。首尾帧相同保证无缝循环。
 
-可复现：python3 pixel-toolkit/examples/gen_slime_idle.py
+可复现：python3 pixel-toolkit/generation/gen_slime_idle.py
 （调色板若缺失则先落盘 assets/palettes/slime.json）
 """
 from __future__ import annotations
@@ -19,7 +19,9 @@ from __future__ import annotations
 import os
 import sys
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+_HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, _HERE)                       # generation/ 内基元：canvas、style_kit
+sys.path.insert(0, os.path.dirname(_HERE))      # 工具库根：anim、layout、palette
 
 import style_kit
 from anim import build_sheet
@@ -27,7 +29,7 @@ from canvas import Canvas
 from layout import sprite_dir
 from palette import Palette
 
-ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+ROOT = os.path.dirname(os.path.dirname(_HERE))   # 上溯三级 = 工程/仓库根（部署于 tools/pixelart/generation/ 时同构）
 PAL_PATH = os.path.join(ROOT, "assets", "palettes", "slime.json")
 OUT_DIR = os.path.join(ROOT, "assets", "sprites")
 SIZE = 32
