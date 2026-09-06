@@ -27,7 +27,7 @@
 3. **裁剪**：抠像后基于 **alpha**（非颜色差）计算全程合并 bbox；`--crop fixed --box` 手动覆盖
 4. **降采样**：`--size 64x64` 面积平均降采样（透明像素不参与色平均；格内不透明占比 ≥1/2 → 不透明，否则透明，alpha 两态）
 5. **量化**：`--colors 16` 跨帧共享色板 OKLab k-means（防闪烁）；`--outline` 时主体量化 k=colors-1 留描边配额
-6. **描边**（可选）：`--outline #rrggbb` 1px 内描边（Canvas.outline_in）
+6. **描边**（可选）：`--outline #000000`（**工程定稿：纯黑 1px 内描边**；深蓝 `#182b54` 为 demo 遗留色，已弃用）
 7. **输出**：帧序列 `<名>_NN.png` + `<名>.gif` + `<名>.html`（播放器）
 
 ## 关键决策记录
@@ -46,7 +46,7 @@
 ```bash
 # 绿幕版完整标准化（12fps 采样 122 帧，64×64，16 色含描边，透明背景）
 python3 pixel-toolkit/pixcli.py video-std asset-test/dog/video/origin_video_greenbg.mp4 \
-    -o <out_dir>/ --size 64x64 --outline '#182b54' --colors 16
+    -o <out_dir>/ --size 64x64 --outline '#000000' --colors 16
 
 # 验收
 python3 pixel-toolkit/pixcli.py check --size 64x64 --max-colors 16 <out_dir>/<名>_0*.png
