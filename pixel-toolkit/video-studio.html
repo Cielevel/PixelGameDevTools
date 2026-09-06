@@ -50,6 +50,7 @@ th,td { padding:2px 6px; text-align:left; }
 <header>
   <h1>🎞️ Video-Std 视频像素化工作台</h1>
   <span class="sub">AI 像素视频 → 标准像素动画（区间 · 采样帧率 · 预览 · 多格式导出）</span>
+  <span class="sub" style="margin-left:auto; opacity:.6">v1.4</span>
 </header>
 <main>
   <!-- 左：设置 -->
@@ -777,9 +778,13 @@ function buildExports() {
 
 /* ─── 初始化：事件绑定 ─── */
 function init() {
+  // 拖拽拦截：document 级兜底（防止拖到非 drop 区浏览器直接打开文件）+ drop 区高亮
+  const onDocDragOver = e => { e.preventDefault(); if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy'; };
+  document.addEventListener('dragover', onDocDragOver);
+  document.addEventListener('drop', e => e.preventDefault());
   $('drop').addEventListener('dragover', e => { e.preventDefault(); $('drop').classList.add('hover'); });
   $('drop').addEventListener('dragleave', () => $('drop').classList.remove('hover'));
-  $('drop').addEventListener('drop', e => { e.preventDefault(); $('drop').classList.remove('hover'); const f=e.dataTransfer.files[0]; if (f) loadVideoFile(f); });
+  $('drop').addEventListener('drop', e => { e.preventDefault(); e.stopPropagation(); $('drop').classList.remove('hover'); const f=e.dataTransfer.files[0]; if (f) loadVideoFile(f); });
   $('file').onchange = e => { if (e.target.files[0]) loadVideoFile(e.target.files[0]); };
   $('addRange').onclick = () => {
     if (!V.video || !V.dur) { setStatus('请先加载视频', true); return; }
