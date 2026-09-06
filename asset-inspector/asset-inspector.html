@@ -23,6 +23,8 @@
   button:hover { background:#3e3f59; }
   button.mini { padding:1px 8px; font-size:12px; }
   input[type=number], input[type=text] { background:#1e1f2e; color:#dfd9c3; border:1px solid #4d4e6c; border-radius:4px; padding:2px 6px; width:64px; font:inherit; }
+  select { background:#1e1f2e; color:#dfd9c3; border:1px solid #4d4e6c; border-radius:4px; padding:2px 6px; font:inherit; }
+  input[type=range] { accent-color:#4ed4e8; vertical-align:middle; }
   input[type=checkbox] { accent-color:#4ed4e8; }
   #vbar { display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin-bottom:8px; }
   #zoom { min-width:40px; text-align:center; color:#4ed4e8; display:inline-block; }
@@ -91,7 +93,22 @@
     <div id="colsum"></div>
     <div id="coltbl"></div>
 
-    <h2>④ 拾色与导出</h2>
+    <h2>④ 合并近似色 → PNG</h2>
+    <div class="row">合并阈值 <input type="range" id="mthr" min="0" max="100" value="0" style="width:140px"> <span id="mthrv">0</span> <span class="note">（RGB 距离，0=不合并）</span></div>
+    <div class="row">缩格（最近邻采样）<select id="mscale">
+      <option value="1" selected>不缩格</option>
+      <option value="2">1/2</option><option value="4">1/4</option><option value="8">1/8</option>
+      <option value="16">1/16</option><option value="32">1/32</option>
+    </select> <span class="note">像素风格大图先缩到逻辑网格</span></div>
+    <div class="row"><label><input type="checkbox" id="malpha" checked> alpha 两态化（≥128→255，对齐工程门禁）</label></div>
+    <div id="mersum" class="note">阈值 &gt; 0 或选择缩格后启用（对当前帧生效）：预览区与下方色表切换为处理结果；③ 仍为原始帧口径。「保存为 PNG」保存当前显示画面。</div>
+    <div id="mertbl" hidden></div>
+    <div class="row">
+      <button class="mini" id="savePng">保存为 PNG</button>
+      <button class="mini" id="expMerged" hidden>导出合并后调色板 JSON</button>
+    </div>
+
+    <h2>⑤ 拾色与导出</h2>
     <div class="note">在预览区点击像素即拾取该色（透明像素不可拾）：</div>
     <div class="chips" id="picked"></div>
     <div class="row">
@@ -174,6 +191,49 @@ function verdict(a, threshold) {
 
 }
 
+/** 近似色合并（调色板量化的确定性变体：按占比排序 + RGB 距离阈值归并到代表色，
+ *  代表色 = 该簇中出现最多的色（众数），同一输入恒得同一输出）。
+ *  threshold = RGB 欧氏距离上限（0 = 不合并）；alphaBin = alpha 两态化（≥128→255，其余→透明）。
+ *  返回 {width, height, data:Uint8ClampedArray}，可直接喂 analyzeImageData / putImageData。 */
+function mergeImageData(id, threshold, alphaBin) {
+  const w = id.width, h = id.height, src = id.data;
+  if (threshold <= 0 && !alphaBin) return id;
+  const counts = new Map();
+  for (let i = 0; i < src.length; i += 4) {
+    if (src[i + 3] === 0) continue;
+    const key = (src[i] << 16) | (src[i + 1] << 8) | src[i + 2];
+    counts.set(key, (counts.get(key) || 0) + 1);
+  }
+  const sorted = Array.from(counts, ([k, n]) => ({ k, n })).sort((a, b) => b.n - a.n);
+  const reps = [];          // 代表色簇 {k, r, g, b}
+  const repOf = new Map();  // 色值 → 代表色值
+  const T2 = threshold * threshold;
+  for (const { k } of sorted) {
+    if (repOf.has(k)) continue;
+    const r = (k >> 16) & 255, g = (k >> 8) & 255, b = k & 255;
+    let best = null, bestD2 = Infinity;
+    if (threshold > 0) {
+      for (const rep of reps) {
+        const dr = r - rep.r, dg = g - rep.g, db = b - rep.b;
+        const d2 = dr * dr + dg * dg + db * db;
+        if (d2 < bestD2) { bestD2 = d2; best = rep; }
+      }
+    }
+    if (best && bestD2 <= T2) repOf.set(k, best.k);
+    else { reps.push({ k, r, g, b }); repOf.set(k, k); }
+  }
+  const out = new Uint8ClampedArray(src.length);
+  for (let i = 0; i < src.length; i += 4) {
+    const a = src[i + 3];
+    if (a === 0) continue;                        // 保持透明
+    if (alphaBin && a < 128) continue;            // 两态化：弱 alpha → 透明
+    const key = repOf.get((src[i] << 16) | (src[i + 1] << 8) | src[i + 2]) || 0;
+    out[i] = (key >> 16) & 255; out[i + 1] = (key >> 8) & 255; out[i + 2] = key & 255;
+    out[i + 3] = alphaBin ? 255 : a;
+  }
+  return { width: w, height: h, data: out };
+}
+
 /* ═══════════ UI 层（仅浏览器） ═══════════ */
 function init() {
   const $ = id => document.getElementById(id);
@@ -190,6 +250,7 @@ function init() {
   let zoom = 1, ox = 0, oy = 0, fitMode = true;
   let picked = [];             // hex 列表
   let lastAnalysis = null;     // 当前帧分析结果
+  let proc = null;             // ④ 合并/缩格处理结果 {canvas,id,analysis,threshold,denom}；null = 未启用
 
   // ── 设置项（localStorage 持久化）──
   const store = {
@@ -372,7 +433,8 @@ function init() {
 
   async function analyzeCurrent(it) {
     const src = it.cur;
-    const a = analyzeImageData(frameToImageData(src));
+    it.curId = frameToImageData(src);
+    const a = analyzeImageData(it.curId);
     lastAnalysis = a;
     it.curIdx = it.frames ? it.frames.indexOf(src) : -1;
     if (it.curIdx >= 0 && $('fno').textContent === '') $('fno').textContent = (it.curIdx + 1) + '/' + it.total + (it.capped ? '+' : '');
@@ -382,6 +444,8 @@ function init() {
     renderInfo(it, a);
     renderCompliance(a);
     renderColors(a);
+    if (procActive()) updateProc();
+    else { proc = null; renderMergePanel(null); }
   }
 
   function renderInfo(it, a) {
@@ -436,19 +500,8 @@ function init() {
       '<p class="kv">alpha 两态：<span class="' + (a.alphaTwoState ? 'ok' : 'no') + '">' +
       (a.alphaTwoState ? '✓ 只含 0/255' : '✗ 含中间 alpha（' + a.midAlphaCount + ' 种）') + '</span>' +
       (a.alphaValues.length === 1 && a.alphaValues[0] === 255 ? '（该格式无透明通道）' : '') + '</p>';
-    const tbl = document.createElement('table');
-    tbl.innerHTML = '<tr><th>色</th><th>HEX</th><th>RGB</th><th>数量</th><th>占比</th></tr>';
-    const shown = a.colors.slice(0, DISPLAY_CAP);
-    shown.forEach(c => {
-      const tr = document.createElement('tr');
-      tr.innerHTML = '<td><span class="sw" style="background:' + c.hex + '"></span></td>' +
-        '<td>' + c.hex + '</td><td>' + c.r + ',' + c.g + ',' + c.b + '</td>' +
-        '<td class="num">' + c.n.toLocaleString() + '</td>' +
-        '<td class="num">' + (100 * c.n / a.opaque).toFixed(2) + '%</td>';
-      tbl.appendChild(tr);
-    });
     $('coltbl').textContent = '';
-    $('coltbl').appendChild(tbl);
+    $('coltbl').appendChild(colorTable(a, DISPLAY_CAP));
     if (a.colors.length > DISPLAY_CAP) {
       const p = document.createElement('p'); p.className = 'note';
       p.textContent = '……其余 ' + (a.colors.length - DISPLAY_CAP) + ' 色未罗列（已按占比截断；照片类素材常见，像素画不应超 16 色）';
@@ -458,9 +511,11 @@ function init() {
 
   // ── 视图（缩放/平移/网格/取色）──
   function drawCurrent(it) {
-    const src = it && it.cur; if (!src) return;
-    const w = src.videoWidth || src.naturalWidth || src.width;
-    const h = src.videoHeight || src.naturalHeight || src.height;
+    if (!it) it = files[cur];
+    const src = proc ? proc.canvas : (it && it.cur);
+    if (!src) return;
+    const w = proc ? proc.analysis.w : (src.videoWidth || src.naturalWidth || src.width);
+    const h = proc ? proc.analysis.h : (src.videoHeight || src.naturalHeight || src.height);
     cv.width = Math.max(1, Math.round(w * zoom)); cv.height = Math.max(1, Math.round(h * zoom));
     ctx.imageSmoothingEnabled = false;
     ctx.clearRect(0, 0, cv.width, cv.height);
@@ -493,8 +548,8 @@ function init() {
 
   function fit() {
     const it = files[cur]; if (!it || !it.cur) return;
-    const w = it.cur.videoWidth || it.cur.naturalWidth || it.cur.width;
-    const h = it.cur.videoHeight || it.cur.naturalHeight || it.cur.height;
+    const w = proc ? proc.analysis.w : (it.cur.videoWidth || it.cur.naturalWidth || it.cur.width);
+    const h = proc ? proc.analysis.h : (it.cur.videoHeight || it.cur.naturalHeight || it.cur.height);
     const wrap = $('stagewrap');
     const fz = Math.min((wrap.clientWidth - 24) / w, (wrap.clientHeight - 24) / h);
     if (fz >= 1) setZoom(Math.floor(fz), false);
@@ -525,10 +580,10 @@ function init() {
     }
     const p = srcPixel(ev);
     hover = p;
-    if (p && lastAnalysis) {
-      const id = frameToImageData(it.cur).data;
-      const i = (p.y * lastAnalysis.w + p.x) * 4;
-      readout.textContent = 'x=' + p.x + ' y=' + p.y + '　' + hex6((id[i] << 16) | (id[i + 1] << 8) | id[i + 2]) + '　a=' + id[i + 3];
+    const dd = displayData(), dm = displayDims();
+    if (p && lastAnalysis && dd) {
+      const i = (p.y * dm.w + p.x) * 4;
+      readout.textContent = 'x=' + p.x + ' y=' + p.y + '　' + hex6((dd[i] << 16) | (dd[i + 1] << 8) | dd[i + 2]) + '　a=' + dd[i + 3];
     } else readout.textContent = '';
     drawCurrent(it);
   });
@@ -537,11 +592,11 @@ function init() {
   addEventListener('mouseup', () => { dragging = false; lastXY = null; });
   cv.addEventListener('click', ev => {
     const p = srcPixel(ev); if (!p || !lastAnalysis) return;
-    const it = files[cur];
-    const id = frameToImageData(it.cur).data;
-    const i = (p.y * lastAnalysis.w + p.x) * 4;
-    if (id[i + 3] === 0) { readout.textContent = 'x=' + p.x + ' y=' + p.y + '　透明像素，不拾取'; return; }
-    const hex = hex6((id[i] << 16) | (id[i + 1] << 8) | id[i + 2]);
+    const dd = displayData(), dm = displayDims();
+    if (!dd) return;
+    const i = (p.y * dm.w + p.x) * 4;
+    if (dd[i + 3] === 0) { readout.textContent = 'x=' + p.x + ' y=' + p.y + '　透明像素，不拾取'; return; }
+    const hex = hex6((dd[i] << 16) | (dd[i + 1] << 8) | dd[i + 2]);
     if (!picked.includes(hex)) picked.push(hex);
     renderPicked();
   });
@@ -559,9 +614,9 @@ function init() {
   }
 
   // ── 导出 ──
-  function download(name, text) {
+  function download(name, data, type) {
     const a = document.createElement('a');
-    a.href = URL.createObjectURL(new Blob([text], { type: 'application/json' }));
+    a.href = URL.createObjectURL(data instanceof Blob ? data : new Blob([data], { type: type || 'application/json' }));
     a.download = name;
     a.click();
     setTimeout(() => URL.revokeObjectURL(a.href), 3000);
@@ -581,6 +636,119 @@ function init() {
     try { await navigator.clipboard.writeText(list); setStatus('已复制 ' + list.split('\n').length + ' 个 HEX'); }
     catch (e) { setStatus('复制失败：' + e.message, true); }
   };
+
+  // 当前显示画面的像素数据（④ 启用时为处理结果，否则为原始帧缓存）
+  const displayDims = () => proc ? proc.analysis : lastAnalysis;
+  function displayData() {
+    const it = files[cur];
+    if (!it) return null;
+    return proc ? proc.id.data : (it.curId && it.curId.data);
+  }
+
+  // ── ④ 合并近似色 → PNG ──
+  function procActive() { return +$('mthr').value > 0 || +$('mscale').value > 1; }
+  let procPending = false;
+  function scheduleProc() {   // 滑杆拖动的 rAF 节流
+    if (procPending) return;
+    procPending = true;
+    requestAnimationFrame(() => { procPending = false; updateProc(); });
+  }
+  function updateProc() {
+    const it = files[cur];
+    if (!it || !it.cur || !procActive()) {
+      const had = !!proc;
+      proc = null; renderMergePanel(null);
+      if (had) drawCurrent(it);
+      return;
+    }
+    const thr = +$('mthr').value, denom = +$('mscale').value, abin = $('malpha').checked;
+    let id;
+    if (denom > 1) {   // 最近邻缩格（imageSmoothing off 的整数缩小即最近邻采样）
+      const src = it.cur;
+      const w = src.videoWidth || src.naturalWidth || src.width;
+      const h = src.videoHeight || src.naturalHeight || src.height;
+      const c = document.createElement('canvas');
+      c.width = Math.max(1, Math.floor(w / denom)); c.height = Math.max(1, Math.floor(h / denom));
+      const cc = c.getContext('2d', { willReadFrequently: true });
+      cc.imageSmoothingEnabled = false;
+      cc.drawImage(src, 0, 0, c.width, c.height);
+      id = cc.getImageData(0, 0, c.width, c.height);
+    } else {
+      id = it.curId || frameToImageData(it.cur);
+    }
+    const merged = mergeImageData(id, thr, abin);
+    const canvas = document.createElement('canvas');
+    canvas.width = merged.width; canvas.height = merged.height;
+    canvas.getContext('2d').putImageData(new ImageData(merged.data, merged.width, merged.height), 0, 0);
+    const prev = proc;
+    proc = { canvas, id: merged, analysis: analyzeImageData(merged), threshold: thr, denom };
+    renderMergePanel(proc.analysis);
+    if (!prev || prev.analysis.w !== proc.analysis.w || prev.analysis.h !== proc.analysis.h) fit();
+    else drawCurrent(it);
+  }
+  function renderMergePanel(a) {
+    const sum = $('mersum'), tblEl = $('mertbl');
+    if (!a) {
+      sum.textContent = '阈值 > 0 或选择缩格后启用（对当前帧生效）：预览区与下方色表切换为处理结果；③ 仍为原始帧口径。「保存为 PNG」保存当前显示画面。';
+      tblEl.hidden = true; tblEl.textContent = '';
+      $('expMerged').hidden = true;
+      return;
+    }
+    const orig = lastAnalysis ? lastAnalysis.colors.length : '—';
+    sum.innerHTML = '<p class="kv">合并后色数：<b>' + a.colors.length + '</b>（原 ' + orig + '）　尺寸：' + a.w + '×' + a.h + (proc.denom > 1 ? '（1/' + proc.denom + ' 缩格）' : '') + '</p>';
+    tblEl.hidden = false; tblEl.textContent = '';
+    tblEl.appendChild(colorTable(a, DISPLAY_CAP));
+    if (a.colors.length > DISPLAY_CAP) {
+      const p = document.createElement('p'); p.className = 'note';
+      p.textContent = '……其余 ' + (a.colors.length - DISPLAY_CAP) + ' 色未罗列';
+      tblEl.appendChild(p);
+    }
+    $('expMerged').hidden = false;
+  }
+  function colorTable(a, cap) {
+    const tbl = document.createElement('table');
+    tbl.innerHTML = '<tr><th>色</th><th>HEX</th><th>RGB</th><th>数量</th><th>占比</th></tr>';
+    a.colors.slice(0, cap).forEach(c => {
+      const tr = document.createElement('tr');
+      tr.innerHTML = '<td><span class="sw" style="background:' + c.hex + '"></span></td>' +
+        '<td>' + c.hex + '</td><td>' + c.r + ',' + c.g + ',' + c.b + '</td>' +
+        '<td class="num">' + c.n.toLocaleString() + '</td>' +
+        '<td class="num">' + (100 * c.n / a.opaque).toFixed(2) + '%</td>';
+      tbl.appendChild(tr);
+    });
+    return tbl;
+  }
+  function pngName() {
+    const it = files[cur];
+    let base = stem();
+    if (it && it.kind === 'gif' && it.curIdx >= 0) base += '_f' + String(it.curIdx).padStart(2, '0');
+    if (proc) base += '_q' + proc.threshold + (proc.denom > 1 ? '_d' + proc.denom : '');
+    return base + '.png';
+  }
+  $('savePng').onclick = () => {
+    const it = files[cur]; if (!it || !it.cur) { setStatus('先加载素材', true); return; }
+    let canvas;
+    if (proc) canvas = proc.canvas;
+    else {
+      const id = it.curId || frameToImageData(it.cur);
+      canvas = document.createElement('canvas');
+      canvas.width = id.width; canvas.height = id.height;
+      canvas.getContext('2d').putImageData(new ImageData(id.data, id.width, id.height), 0, 0);
+    }
+    canvas.toBlob(b => {
+      if (!b) { setStatus('PNG 导出失败', true); return; }
+      download(pngName(), b, 'image/png');
+      setStatus('已保存 ' + pngName() + '（' + canvas.width + '×' + canvas.height + '，无损 PNG' + (proc ? '，合并后 ' + proc.analysis.colors.length + ' 色' : '') + '）');
+    }, 'image/png');
+  };
+  $('expMerged').onclick = () => {
+    if (!proc) return;
+    download(stem() + '_q' + proc.threshold + (proc.denom > 1 ? '_d' + proc.denom : '') + '_palette.json',
+             toJson(proc.analysis.colors.map(c => c.hex)));
+  };
+  $('mthr').oninput = e => { $('mthrv').textContent = e.target.value; scheduleProc(); };
+  $('mscale').onchange = updateProc;
+  $('malpha').onchange = updateProc;
 
   // ── 工具条事件 ──
   $('plus').onclick = () => setZoom(zoom + 1);
@@ -629,7 +797,7 @@ function init() {
 const escapeHtml = s => String(s).replace(/[&<>"]/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[ch]));
 
 if (typeof document !== 'undefined' && document.getElementById('cv')) init();
-if (typeof module !== 'undefined' && module.exports) module.exports = { analyzeImageData, checkTiers, checkTile, checkScaleFit, verdict, hex6 };
+if (typeof module !== 'undefined' && module.exports) module.exports = { analyzeImageData, checkTiers, checkTile, checkScaleFit, verdict, hex6, mergeImageData };
 </script>
 </body>
 </html>
