@@ -175,14 +175,17 @@ function alphaStats(id) {
 
 /* 主体放置到输出画布：不改变主体像素大小，画布 cw×ch，主体居中后按 dx/dy 平移（越界裁剪）。
    输入 img 为"主体尺寸"帧（含透明边）；输出 cw×ch 帧。 */
+/* 主体放置到输出画布：不改变主体像素大小，画布 cw×ch。
+   每帧主体 bbox 中心对齐到画布中心 + dx/dy（消除帧间位置漂移→左右抖动）；
+   用浮点中心舍入到整像素，bbox 宽度波动只影响内容边缘、不影响整体位置。 */
 function placeOnCanvas(img, cw, ch, dx, dy) {
   const out = new Uint8ClampedArray(cw*ch*4);
   const s = alphaStats(img);
   if (!s.bbox) return { width:cw, height:ch, data:out };
-  const [bx0, by0] = s.bbox;
-  const bw = s.bbox[2]-bx0+1, bh = s.bbox[3]-by0+1;
-  const ox = Math.round((cw-bw)/2) - bx0 + (dx|0);
-  const oy = Math.round((ch-bh)/2) - by0 + (dy|0);
+  const [bx0, by0, bx1, by1] = s.bbox;
+  const cx = (bx0+bx1)/2, cy = (by0+by1)/2;         // 该帧主体中心（浮点）
+  const ox = Math.round(cw/2 - cx + (dx|0));
+  const oy = Math.round(ch/2 - cy + (dy|0));
   for (let y=0;y<img.height;y++) for (let x=0;x<img.width;x++) {
     const i=(y*img.width+x)*4;
     if (!img.data[i+3]) continue;
@@ -441,14 +444,15 @@ function processAll(frames) {
   const fit = $('fit').checked;
   const cw = Math.max(1,+$('cw').value||64), ch = Math.max(1,+$('ch').value||64);
   const dx = +( $('dx').value || 0)|0, dy = +($('dy').value || 0)|0;
+  const key = $('key').value;
+  const ow=Math.max(1,+$('ow').value||64), oh=Math.max(1,+$('oh').value||64);
+  // 抠像 + 等比降采样到主体尺寸 → 放置到输出画布（每帧 bbox 中心对齐画布中心，消除帧间漂移抖动）
   const raw = [];
   for (const f of frames) { const im = { width:f.width, height:f.height, data:new Uint8ClampedArray(f.data) };
     let img = im;
-    const key = $('key').value;
     if (key === 'green' || (key === 'auto' && detectGreen(img))) img = chromaKey(img);
-    const ow=Math.max(1,+$('ow').value||64), oh=Math.max(1,+$('oh').value||64);
     img = downsampleContain(img, ow, oh, fit);
-    img = placeOnCanvas(img, cw, ch, dx, dy);   // 放置到输出画布 + 位置偏移（主体像素不变）
+    img = placeOnCanvas(img, cw, ch, dx, dy);
     raw.push(img);
   }
   const outline = $('outline').checked, ocol = $('outlineColor').value;
