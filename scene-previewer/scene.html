@@ -37,7 +37,10 @@
 //       单一时钟按 fps 推进帧号——分层动画的分层数据在此合成播放。
 const P  = '../../assets/sprites/player/';
 const seq = (prefix, n) => [...Array(n)].map((_, i) => P + prefix + '_' + String(i).padStart(2, '0') + '.png');
-const zip = (a, b) => a.map((s, i) => [s, b[i]]);
+const zip = (a, b) => {
+  if (a.length !== b.length) console.warn(`[scene-previewer] 本体 ${a.length} 帧与配件 ${b.length} 帧数量不一致：按本体 ${a.length} 帧合成，不足侧该帧跳绘（配件多出的帧被忽略）。请核对帧序列。`);
+  return a.map((s, i) => [s, b[i]]);   // 以本体为主动画，配件帧不足时该帧只显示本体
+};
 
 // 示例：本体帧 + 配件帧 同钟合成（换成你的帧前缀与帧数）
 const IDLE = seq('hero_idle', 6), ACC = seq('hero_acc_aura_idle', 6);
@@ -95,13 +98,22 @@ async function boot() {
     ...SCENE.sprites.flatMap(sp => spriteSrcs(sp).map(src => load(src).then(im => [src, im]))),
   ];
   const out = new Map();
-  let fail = 0;
+  let fail = 0, tileWarn = 0;
   for (const j of jobs) {
     try { const [k, im] = await j; out.set(k, im); }
     catch (e) { fail++; statusEl.textContent = '加载失败: ' + e.message; statusEl.className = 'err'; }
   }
+  // tileset 一律按 32×32 单帧处理：非 32×32 时按左上第一格裁剪并在状态栏提示（避免整图缩进一格）
+  for (const [ch, src] of Object.entries(SCENE.tilesets)) {
+    const im = out.get(ch);
+    if (im && (im.width !== 32 || im.height !== 32)) {
+      tileWarn++;
+      console.warn(`[scene-previewer] tileset '${ch}' 为 ${im.width}×${im.height}，按 32×32 单帧处理：取左上 ${Math.min(32, im.width)}×${Math.min(32, im.height)} 格。若为多格 sheet，请在 SCENE.tilesets 换成 32×32 单帧。`);
+    }
+  }
   if (!fail) {
-    statusEl.textContent = `就绪：${SCENE.map[0].length}×${SCENE.map.length} 格 + ${SCENE.sprites.length} 个精灵（含帧动画）`;
+    statusEl.textContent = `就绪：${SCENE.map[0].length}×${SCENE.map.length} 格 + ${SCENE.sprites.length} 个精灵（含帧动画）` +
+      (tileWarn ? `（${tileWarn} 个 tileset 非 32×32，取左上格）` : '');
     statusEl.className = '';
   }
   return out;
@@ -115,7 +127,7 @@ function draw(imgs, t) {
   SCENE.map.forEach((row, ry) => {
     [...row].forEach((ch, rx) => {
       const im = imgs.get(ch);
-      if (im) ctx.drawImage(im, rx * T, ry * T, T, T);
+      if (im) ctx.drawImage(im, 0, 0, Math.min(32, im.width), Math.min(32, im.height), rx * T, ry * T, T, T);
     });
   });
   for (const sp of SCENE.sprites) {

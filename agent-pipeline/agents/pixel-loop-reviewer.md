@@ -32,7 +32,7 @@ tools: [Read, Bash]
 4. **多部件相位关系**：错相部件（如触手波浪、多灯球脉动）全周期相位差应稳定，无相位漂移导致的穿插、穿模或同相塌缩
 
 ## 检查手段
-- `pixcli anim`（相邻/循环帧间 diff 率、面积序列）独立复跑；`pixcli onion` 重点看**首尾叠加帧**（wrap 处红蓝皮密度应与其他相邻帧相当）；`pixcli preview` 出 GIF 连播目视 ≥3 圈；`contact --grid` 定位问题像素坐标（产物只落系统临时目录）
+- `pixcli anim <帧>`（相邻/循环帧间 diff 率、面积序列）独立复跑；`pixcli onion <帧> -o <tmp>/onion.png` 重点看**首尾叠加帧**（wrap 处红蓝皮密度应与其他相邻帧相当）；`pixcli preview <帧> --out <tmp> --name <loop>` 出 GIF 连播目视 ≥3 圈；`pixcli contact <帧> -o <tmp>/f.png --grid` 定位问题像素坐标（产物只落系统临时目录）
 - 自定义 Python 轨迹量化：逐帧 bbox 四缘、质心、申报部件行表列成全周期表（含 wrap 步），核闭合性；数值可与 artist 申报交叉比对，不采信不复算
 - 逐帧翻看 + 连播目视双过；只报亲眼确认的问题，帧号/坐标具体
 

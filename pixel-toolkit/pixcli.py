@@ -112,10 +112,11 @@ def cmd_quantize(args):
     if out_is_dir:
         os.makedirs(args.out, exist_ok=True)
     for f in files:
-        img = Image.open(f).convert("RGBA")
+        # 先在源图上做 alpha 两态化，使 --alpha-threshold 真正生效；
+        # 否则 quantize 会把所有 a!=0 像素强制成 255，后续两态化成为空操作
+        img = palmod.enforce_alpha(Image.open(f).convert("RGBA"), args.alpha_threshold)
         before = len(palmod.count_colors(img))
         out = palmod.quantize(img, palette)
-        out = palmod.enforce_alpha(out, args.alpha_threshold)
         after = len(palmod.count_colors(out))
         dst = os.path.join(args.out, os.path.basename(f)) if out_is_dir else args.out
         out.save(dst)

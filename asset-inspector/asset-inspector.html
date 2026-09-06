@@ -132,7 +132,7 @@
     </div>
     <div id="mersum" class="note">阈值 &gt; 0 或选择缩格后启用：预览区与 ④ 色表切换为处理结果。</div>
 
-    <h2>④ 颜色表</h2>
+    <h2>④ 颜色表　<label class="note">色数上限 <input type="number" id="maxcolors" min="1" step="1" value="16" style="width:3.2em"></label></h2>
     <div id="mertbl"></div>
     <details id="origdetails" open><summary id="origsummary">原始帧色表</summary>
       <div id="colsum"></div>
@@ -730,23 +730,30 @@ function init() {
   function setupVideoControls(it) {
     const v = it.video;
     $('play').onclick = () => { if (v.paused) v.play(); else v.pause(); };
-    v.onplay = () => $('play').textContent = '⏸';
+    v.onplay = () => {
+      $('play').textContent = '⏸';
+      let n = 0;
+      const tick = () => {   // 播放中实时跟帧：捕获当前帧 → 重绘，画面可见而非静止
+        if (v.paused || !it.cur) { $('play').textContent = '▶'; return; }
+        it.curId = frameToImageData(v);
+        if (procActive()) { if ((n++ % 4) === 0) updateProc(); }   // 处理模式按 ~15fps 节流重算
+        else { rebuildComp(); drawCurrent(it); }                    // 原始帧 60fps 平滑
+        requestAnimationFrame(tick);
+      };
+      requestAnimationFrame(tick);
+      if (v.requestVideoFrameCallback) {   // 播放中顺带统计帧数
+        const count = (now, meta) => {
+          if (meta.presentedFrames > (it._pf || 0)) { it._pf = meta.presentedFrames; it.total = it._pf; $('fno').textContent = '已见 ' + it.total + ' 帧'; }
+          if (!v.paused) v.requestVideoFrameCallback(count);
+        };
+        v.requestVideoFrameCallback(count);
+      }
+    };
     v.onpause = () => { $('play').textContent = '▶'; drawCurrent(it); analyzeCurrent(it); };
     const step = d => { v.pause(); v.currentTime = Math.max(0, Math.min(v.duration || 0, v.currentTime + d)); };
     $('prev').onclick = () => step(-1 / 30);
     $('next').onclick = () => step(1 / 30);
     v.onseeked = () => { drawCurrent(it); analyzeCurrent(it); };
-    // 播放中顺带统计帧数（requestVideoFrameCallback 可用时）
-    if (v.requestVideoFrameCallback) {
-      v.onplay = () => {
-        $('play').textContent = '⏸';
-        const tick = (now, meta) => {
-          if (meta.presentedFrames > (it._pf || 0)) { it._pf = meta.presentedFrames; it.total = it._pf; $('fno').textContent = '已见 ' + it.total + ' 帧'; }
-          if (!v.paused) v.requestVideoFrameCallback(tick);
-        };
-        v.requestVideoFrameCallback(tick);
-      };
-    }
   }
 
   // ── 分析 ──
@@ -822,6 +829,7 @@ function init() {
 
   function renderColors(a) {
     const th = store.threshold;
+    $('maxcolors').value = th;
     const over = a.colors.length > th;
     $('colsum').innerHTML =
       '<p class="kv">色数（不透明唯一 RGB）：<b>' + a.colors.length + '</b> / 上限 ' + th +
@@ -1007,7 +1015,7 @@ function init() {
   }
 
   // ── ③ 处理与导出：缩格（采样方式）→ 合并 → 量化 → 描边 / 笔刷 ──
-  function procActive() { return +$('mthr').value > 0 || +$('mscale').value > 1 || +$('mk').value > 0; }
+  function procActive() { return +$('mthr').value > 0 || +$('mscale').value > 1 || +$('mk').value > 0 || $('mbg').checked || $('malpha').checked; }
   let gridOrigin = { x: 0, y: 0 };   // 检测网格给出的格内容相位；手动改缩格即作废
   let procPending = false;
   function scheduleProc() {   // 滑杆拖动的 rAF 节流
@@ -1145,6 +1153,14 @@ function init() {
   $('mk').onchange = updateProc;
   $('mbg').onchange = updateProc;
   $('malpha').onchange = updateProc;
+  $('maxcolors').onchange = e => {
+    store.threshold = Math.max(1, Math.round(+e.target.value) || 16);
+    e.target.value = store.threshold;
+    if (!lastAnalysis) return;
+    renderColors(lastAnalysis);
+    const it = files[cur];
+    if (it) { it.badge = { text: lastAnalysis.w + '×' + lastAnalysis.h + '·' + lastAnalysis.colors.length + '色', bad: lastAnalysis.colors.length > store.threshold || !lastAnalysis.alphaTwoState }; renderQueue(); }
+  };
   $('detectGrid').onclick = () => {
     const it = files[cur];
     if (!it || !it.cur) { setStatus('先加载素材', true); return; }
