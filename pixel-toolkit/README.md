@@ -20,6 +20,7 @@
 | `palette.py` | 调色板 JSON 读写（`assets/palettes/`）、最近色映射（OKLab 感知色距）、`quantize` 归入色板、`enforce_alpha` 两态化、色条 PNG 导出 |
 | `standardize.py` | AI 像素图标准化：亮度梯度自相关检测逻辑网格（含相位）→ 单元内鲁棒采样（众数分桶+mean-shift / 逐通道中位数）→ OKLab 加权 k-means 量化 / 映射工程色板 → 四角背景检测（边界连通清除）；多输入自动共享网格与色板（防闪烁）。源自 `ai-pixel-art-standardization-handoff/` 交接包升级建议，实测报告见其 `report-standardization-bench.md` |
 | `video.py` | **AI 像素视频标准化**：ffmpeg 抽帧 → 角色区裁剪（自动/fixed）→ 像素化降采样 → 跨帧共享色板 OKLab 量化 → 背景透明化 → 可选 1px 描边 → 帧序列+GIF+HTML 播放器。AI 动态视频（平滑运动+压缩）无稳定逻辑网格，默认走降采样而非网格还原 |
+| `video-studio.html` | **视频像素化交互工作台**（纯静态单 HTML，双击即用、离线、零依赖）：① 选择视频区间 ② 自定义采样帧率（12/24/30/60+custom）③ 标准化参数（尺寸/等比/色数/黑描边/绿幕）实时预览 ④ 多导出方案（HTML 播放器 / GIF / Sprite Sheet / PNG 序列 / ZIP 打包）。处理管线与 `video.py` 同构（绿幕抠像→等比降采样→跨帧共享 OKLab 量化→描边） |
 | `anim.py` | 序列帧 I/O、sprite sheet 拼合/切分、GIF 导出、自包含 HTML 播放器、放大逐帧检查图（可叠像素网格坐标）、洋葱皮静态检查图 |
 | `check.py` | 程序化自检：尺寸 / 模式 / alpha 两态 / 色数 / 调色板 / 帧组脚底与水平中心对齐 / 动画一致性（死帧 P1、跳变与循环突断 P2）/ 孤立像素 / 连通域计数（默认信息，`--components-max` 升门禁）；帧组按文件名前缀自动聚合，整目录混检互不误报；另提供 `frame_stats` 动画统计（不设门禁） |
 | `layout.py` | sprites 子目录布局约定：按资产名前缀映射子目录（`sprite_dir`），前缀表按工程清单修订 |

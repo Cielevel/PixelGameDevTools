@@ -1,0 +1,688 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<title>Video-Std 视频像素化工作台</title>
+<style>
+:root { --bg:#1e2229; --panel:#262b34; --edge:#3a4150; --txt:#d8dde6; --sub:#9aa4b2; --acc:#4da3ff; --ok:#3fbf7f; --warn:#e0a03f; }
+* { box-sizing:border-box; }
+body { margin:0; background:var(--bg); color:var(--txt); font:13px/1.5 "PingFang SC","Microsoft YaHei",system-ui,sans-serif; }
+header { padding:8px 14px; background:var(--panel); border-bottom:1px solid var(--edge); display:flex; gap:12px; align-items:center; }
+header h1 { font-size:15px; margin:0; font-weight:600; }
+header .sub { color:var(--sub); font-size:12px; }
+main { display:grid; grid-template-columns:300px 1fr 260px; grid-template-rows:1fr auto; grid-gap:0; height:calc(100vh - 45px); }
+section { overflow:auto; padding:12px; }
+#left { border-right:1px solid var(--edge); }
+#center { display:flex; flex-direction:column; align-items:center; }
+#right { border-left:1px solid var(--edge); }
+h2 { font-size:13px; color:var(--sub); margin:0 0 8px; font-weight:600; text-transform:uppercase; letter-spacing:.5px; }
+fieldset { border:1px solid var(--edge); border-radius:6px; margin:0 0 10px; padding:8px 10px; }
+legend { font-size:12px; color:var(--sub); padding:0 6px; }
+.row { display:flex; gap:6px; align-items:center; margin:6px 0; flex-wrap:wrap; }
+label { color:var(--sub); }
+input[type=text],input[type=number],input[type=color],select { background:#1a1e25; border:1px solid var(--edge); color:var(--txt); border-radius:4px; padding:3px 6px; font:inherit; }
+input[type=number] { width:70px; }
+input[type=checkbox] { accent-color:var(--acc); }
+button { background:#2b323d; border:1px solid var(--edge); color:var(--txt); border-radius:4px; padding:4px 10px; font:inherit; cursor:pointer; }
+button:hover { background:#343d4a; }
+button.primary { background:var(--acc); border-color:var(--acc); color:#fff; font-weight:600; }
+button.primary:hover { filter:brightness(1.1); }
+button.mini { padding:2px 6px; font-size:12px; }
+#drop { width:100%; height:200px; border:2px dashed var(--edge); border-radius:8px; display:flex; align-items:center; justify-content:center; text-align:center; color:var(--sub); cursor:pointer; }
+#drop.hover { border-color:var(--acc); color:var(--acc); }
+#vstage { position:relative; background:#14161a; border:1px solid var(--edge); border-radius:6px; overflow:hidden; }
+#vstage img,#vstage canvas { display:block; background:repeating-conic-gradient(#2a2e35 0 25%, #1f242b 0 50%) 0 0/24px 24px; }
+#vmeta { margin-top:8px; color:var(--sub); font-size:12px; white-space:pre; }
+#previewbar { width:100%; display:flex; gap:8px; align-items:center; margin-top:8px; flex-wrap:wrap; }
+#previewbar input[type=range] { flex:1; }
+#status { margin-top:6px; font-size:12px; color:var(--sub); min-height:18px; }
+#timeline { width:100%; margin-top:6px; }
+.seg { color:var(--warn); font-weight:600; }
+.exp-bar { display:flex; gap:4px; flex-wrap:wrap; margin:4px 0; }
+.note { color:var(--sub); font-size:12px; }
+.legend { color:var(--sub); font-size:12px; margin:4px 0; }
+th,td { padding:2px 6px; text-align:left; }
+#fstats { width:100%; border-collapse:collapse; font-size:12px; }
+#fstats td { border-top:1px solid var(--edge); }
+</style>
+</head>
+<body>
+<header>
+  <h1>🎞️ Video-Std 视频像素化工作台</h1>
+  <span class="sub">AI 像素视频 → 标准像素动画（区间 · 采样帧率 · 预览 · 多格式导出）</span>
+</header>
+<main>
+  <!-- 左：设置 -->
+  <section id="left">
+    <div id="drop" onclick="$('file').click()">拖入或点击选择视频<br><span class="note">MP4 / WebM / MOV（浏览器可解码）</span></div>
+    <input type="file" id="file" accept="video/*" hidden>
+    <div id="vmeta"></div>
+
+    <fieldset><legend>① 视频区间</legend>
+      <div class="row"><label>起点(s)</label><input type="number" id="t0" step="0.1" min="0" value="0"></div>
+      <div class="row"><label>终点(s)</label><input type="number" id="t1" step="0.1" min="0" value="0"></div>
+      <div class="row">
+        <button class="mini" id="setT0" title="把当前预览位置的秒数设为起点">从当前位置起</button>
+        <button class="mini" id="setT1" title="把当前预览位置的秒数设为终点">到当前位置止</button>
+      </div>
+    </fieldset>
+
+    <fieldset><legend>② 采样帧率</legend>
+      <div class="row"><input type="number" id="fps" step="0.1" min="1" value="24"><label>帧/秒（从区间均匀采样）</label></div>
+      <div class="row">
+        <button class="mini" data-fps="12">12</button>
+        <button class="mini" data-fps="24">24</button>
+        <button class="mini" data-fps="30">30</button>
+        <button class="mini" data-fps="60">60</button>
+        <span class="note">源 24fps 时：24=全帧，12=减半</span>
+      </div>
+    </fieldset>
+
+    <fieldset><legend>③ 标准化参数</legend>
+      <div class="row"><label>目标尺寸</label><input type="number" id="ow" min="1" value="64"><label>×</label><input type="number" id="oh" min="1" value="64"><label>px</label></div>
+      <div class="row"><label>等比保形</label><input type="checkbox" id="fit" checked><span class="note">contain（居中留边）</span></div>
+      <div class="row"><label>目标色数</label><input type="number" id="colors" min="0" max="64" value="16"><span class="note">0=不量化</span></div>
+      <div class="row"><label>1px 描边</label><input type="color" id="outlineColor" value="#000000"><input type="checkbox" id="outline" checked></div>
+      <div class="row"><label>绿幕抠像</label>
+        <select id="key"><option value="auto">auto（检测绿幕）</option><option value="none">none</option><option value="green">强制绿幕</option></select>
+      </div>
+    </fieldset>
+
+    <fieldset><legend>④ 导出方案（可多选，导出后点每项下载）</legend>
+      <div class="row"><input type="checkbox" id="expHtml" checked><label>HTML 播放器</label></div>
+      <div class="row"><input type="checkbox" id="expGif" checked><label>GIF</label></div>
+      <div class="row"><input type="checkbox" id="expSheet" checked><label>Sprite Sheet（横向）</label></div>
+      <div class="row"><input type="checkbox" id="expPngs" checked><label>PNG 帧序列</label></div>
+      <div class="row"><button id="dlZip" class="mini">导出 ZIP（帧 PNG 打包）</button></div>
+    </fieldset>
+  </section>
+
+  <!-- 中：预览 -->
+  <section id="center">
+    <h2>预览（参数修改即重处理）</h2>
+    <div id="vstage"><img id="prev" style="max-width:100%;max-height:46vh"></div>
+    <div id="previewbar">
+      <button id="pbtn" class="primary">▶ 处理</button>
+      <button id="playbtn" disabled>▶ 播放</button>
+      <label>缩放</label><input type="range" id="zoom" min="1" max="8" value="4" style="width:110px"><input type="number" id="zoomN" min="1" max="16" value="4" style="width:50px">
+      <label>帧号</label><input type="range" id="frameIdx" min="0" max="0" value="0" style="width:140px"><span id="frameNo">0/0</span>
+    </div>
+    <div id="timeline"></div>
+    <div id="status"></div>
+  </section>
+
+  <!-- 右：统计 + 导出 -->
+  <section id="right">
+    <h2>帧统计</h2>
+    <table id="fstats"></table>
+    <div class="legend">按 pixcli check 口径：尺寸 / alpha 两态 / 色数 ≤16 / 连通域 / 孤立像素提示（P2）</div>
+    <h2 style="margin-top:16px">导出（已处理帧）</h2>
+    <div class="exp-bar" id="exports"></div>
+    <div class="note" id="expNote">点「▶ 处理」后在此生成导出项。</div>
+  </section>
+</main>
+<script>
+"use strict";
+/* ═══════════════ 算法层（纯函数，复用 asset-inspector 的 OKLab/检测语义） ═══ */
+function $ (id) { return document.getElementById(id); }
+
+function rgbToOklab(r, g, b) {
+  const l = c => { c /= 255; return c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4); };
+  const rl = l(r), gl = l(g), bl = l(b);
+  const L = 0.4122214708 * rl + 0.5363325363 * gl + 0.0514459929 * bl;
+  const M = 0.2119034982 * rl + 0.6806995451 * gl + 0.1073969566 * bl;
+  const S = 0.0883024619 * rl + 0.2817188376 * gl + 0.6299787005 * bl;
+  const l_ = Math.cbrt(L), m_ = Math.cbrt(M), s_ = Math.cbrt(S);
+  return [0.2104542553 * l_ + 0.7936177850 * m_ - 0.0040720468 * s_,
+          1.9779984951 * l_ - 2.4285922050 * m_ + 0.4505937099 * s_,
+          0.0259040371 * l_ + 0.7827717662 * m_ - 0.8086757660 * s_];
+}
+function oklabDist2(a, b) { const dL = a[0]-b[0], da = a[1]-b[1], db = a[2]-b[2]; return dL*dL + da*da + db*db; }
+
+/* 绿幕检测/抠像（与 pixel-toolkit/video.py 语义一致） */
+function isGreenish(r, g, b) { return g > 60 && g > r * 1.1 && g > b * 1.1; }
+function detectGreen(id) {
+  const px = (x,y) => { const i=(y*id.width+x)*4; return [id.data[i],id.data[i+1],id.data[i+2]]; };
+  const w = id.width, h = id.height;
+  const c = [px(0,0), px(w-1,0), px(0,h-1), px(w-1,h-1)];
+  const sum = [0,0,0];
+  for (const p of c) { sum[0]+=p[0]; sum[1]+=p[1]; sum[2]+=p[2]; }
+  const avg = [sum[0]/4|0, sum[1]/4|0, sum[2]/4|0];
+  return isGreenish(avg[0], avg[1], avg[2]);
+}
+function chromaKey(id) {   // 色度判定，绿→透明（与视频标准化口径一致）
+  const d = new Uint8ClampedArray(id.data), w = id.width, h = id.height;
+  for (let i = 0; i < d.length; i += 4) {
+    const r=d[i], g=d[i+1], b=d[i+2];
+    if (d[i+3] && g > 60 && g > r*1.1 && g > b*1.1 && (g-r) > 40 && (g-b) > 40) { d[i]=d[i+1]=d[i+2]=0; d[i+3]=0; }
+  }
+  return { width:w, height:h, data:d };
+}
+
+/* 透明像素统计 + 内容 bbox（alpha 判据） */
+function alphaStats(id) {
+  const d = id.data, w = id.width, h = id.height;
+  let x0=Infinity,y0=Infinity,x1=-1,y1=-1,total=0;
+  for (let y=0;y<h;y++) for (let x=0;x<w;x++) {
+    const i=(y*w+x)*4;
+    if (d[i+3]>0) { total++; if(x<x0)x0=x; if(y<y0)y0=y; if(x>x1)x1=x; if(y>y1)y1=y; }
+  }
+  return { count: total, bbox: total ? [x0,y0,x1,y1] : null };
+}
+
+/* 等比降采样（含 alpha 两态化：格内不透明占比 ≥1/2 → 不透明取均值，否则透明） */
+function downsampleContain(id, tw, th) {
+  const src = id, sx = src.width, sy = src.height;
+  let offX=0, offY=0;
+  if (sx/sy > tw/th) { offX = Math.floor((tw - th*sx/sy)/2); }
+  // 直接用比例计算缩放区域
+  const scale = Math.min(tw/sx, th/sy);
+  const nw = Math.max(1, Math.round(sx*scale)), nh = Math.max(1, Math.round(sy*scale));
+  const out = new Uint8ClampedArray(tw*th*4);
+  const d = src.data;
+  for (let ty=0; ty<th; ty++) for (let tx=0; tx<tw; tx++) {
+    // 该输出格映射到源区域
+    const sxx = Math.floor((tx - (tw-nw)/2) / (nw/sx));  // 未用 — 简化: 均匀映射
+    const tX = tx - Math.floor((tw-nw)/2), tY = ty - Math.floor((th-nh)/2);
+    const o = (ty*tw+tx)*4;
+    if (tX<0 || tY<0 || tX>=nw || tY>=nh) { out[o+3]=0; continue; }
+    const x0 = Math.floor(tX*sx/nw), x1 = Math.max(x0+1, Math.floor((tX+1)*sx/nw));
+    const y0 = Math.floor(tY*sy/nh), y1 = Math.max(y0+1, Math.floor((tY+1)*sy/nh));
+    let n=0, r=0,g=0,b=0;
+    for (let yy=y0; yy<y1; yy++) for (let xx=x0; xx<x1; xx++) {
+      const i=(yy*sx+xx)*4;
+      if (d[i+3]) { r+=d[i]; g+=d[i+1]; b+=d[i+2]; n++; }
+    }
+    if (n) { const tot=(x1-x0)*(y1-y0); if (n*2 >= tot) { out[o]=r/n|0; out[o+1]=g/n|0; out[o+2]=b/n|0; out[o+3]=255; } }
+  }
+  return { width:tw, height:th, data:out };
+}
+
+/* 跨帧共享色板 OKLab k-means（与 video.py/standardize 语义一致，确定性） */
+function buildPaletteK(items, k, iters=24) {  // items: [[r,g,b,n],...]
+  const labs = items.map((it) => ({ c: it, n: it[3], lab: rgbToOklab(it[0],it[1],it[2]) }));
+  labs.sort((a,b) => b.n - a.n);
+  const seeds = [labs[0].lab];
+  const chosen = [0];
+  while (seeds.length < k) {
+    let bi=-1,bd=-1;
+    for (let i=0;i<labs.length;i++) { if (chosen.includes(i)) continue;
+      let d=Infinity; for (const s of seeds) d=Math.min(d, oklabDist2(labs[i].lab,s));
+      if (d>bd){bd=d;bi=i;} }
+    if (bi<0) break;
+    seeds.push(labs[bi].lab); chosen.push(bi);
+  }
+  const assigns = new Array(labs.length).fill(0);
+  for (let it=0; it<iters; it++) {
+    let moved=false;
+    for (let i=0;i<labs.length;i++) {
+      let bi=0,bd=Infinity;
+      for (let j=0;j<seeds.length;j++) { const d=oklabDist2(labs[i].lab,seeds[j]); if (d<bd){bd=d;bi=j;} }
+      if (assigns[i]!==bi){assigns[i]=bi;moved=true;}
+    }
+    // 更新种子（重心，OKLab 平均近似）
+    const acc = seeds.map(()=>[0,0,0,0]);
+    for (let i=0;i<labs.length;i++) { const a=acc[assigns[i]], w=labs[i].n;
+      a[0]+=labs[i].lab[0]*w; a[1]+=labs[i].lab[1]*w; a[2]+=labs[i].lab[2]*w; a[3]+=w; }
+    for (let j=0;j<seeds.length;j++) { const a=acc[j]; if (a[3]) seeds[j]=[a[0]/a[3],a[1]/a[3],a[2]/a[3]]; }
+    if (!moved) break;
+  }
+  return seeds.map((lab) => {  // lab→rgb（近似反变换）
+    const l=lab[0],m=lab[1],s=lab[2];
+    const L=l+0.3963377774*m+0.2158037573*s, M=l-0.1055613458*m-0.0638541728*s, S=l-0.0894841775*m-1.2914855480*s;
+    const l3=L*L*L, m3=M*M*M, s3=S*S*S;
+    const rl=4.0767416621*l3-3.3077115913*m3+0.2309699292*s3,
+          gl=-1.2684380046*l3+2.6097574011*m3-0.3413193965*s3,
+          bl=-0.0041960863*l3-0.7034186147*m3+1.7076147010*s3;
+    const g2 = c => { c = Math.max(0,Math.min(1,c)); return c <= 0.0031308 ? 12.92*c : 1.055*Math.pow(c,1/2.4)-0.055; };
+    return [Math.round(g2(rl)*255), Math.round(g2(gl)*255), Math.round(g2(bl)*255)];
+  });
+}
+function mapToPalette(id, pal) {  // pal: [[r,g,b],...]
+  const d = new Uint8ClampedArray(id.data), w=id.width,h=id.height;
+  const cache = new Map();
+  for (let i=0;i<d.length;i+=4) {
+    if (!d[i+3]) continue;
+    const k = (d[i]<<16)|(d[i+1]<<8)|d[i+2];
+    let c = cache.get(k);
+    if (!c) { const lab=rgbToOklab(d[i],d[i+1],d[i+2]); let bi=0,bd=Infinity;
+      for (let j=0;j<pal.length;j++){ const dd=oklabDist2(lab,rgbToOklab(pal[j][0],pal[j][1],pal[j][2])); if(dd<bd){bd=dd;bi=j;} }
+      c = pal[bi]; cache.set(k,c); }
+    const o=i; d[o]=c[0]; d[o+1]=c[1]; d[o+2]=c[2]; d[o+3]=255;
+  }
+  return { width:w, height:h, data:d };
+}
+
+/* 数据统计（按 check 口径） */
+function analyzeId(id) {
+  const d=id.data, cols=new Map(); let alphaTwo=true, comps=0, iso=0;
+  for (let i=0;i<d.length;i+=4){ const a=d[i+3]; if (a!==0&&a!==255) alphaTwo=false; if(!a)continue;
+    const k=(d[i]<<16)|(d[i+1]<<8)|d[i+2]; cols.set(k,(cols.get(k)||0)+1); }
+  const a=alphaStats(id);
+  return { w:id.width,h:id.height, colors:cols.size, alphaTwo, opaque:a.count };
+}
+
+/* ═══════════════ UI 层 ═══════════════ */
+const V = { video:null, url:null, dur:0, frames:[], processed:[], playing:false, timer:null, fidx:0 };
+
+function setStatus(msg, err) { $('status').textContent = msg; $('status').style.color = err ? 'var(--warn)' : 'var(--sub)'; }
+
+function fmtT(s) { return s.toFixed(2) + 's'; }
+
+/* --- 加载视频 --- */
+function loadVideoFile(file) {
+  if (V.url) URL.revokeObjectURL(V.url);
+  V.url = URL.createObjectURL(file);
+  const v = document.createElement('video');
+  v.muted = true; v.preload = 'auto'; v.src = V.url;
+  v.onloadedmetadata = () => {
+    V.video = v; V.dur = v.duration || 0;
+    $('t1').value = V.dur.toFixed(2);
+    $('vmeta').textContent =
+      `${file.name}\n尺寸 ${v.videoWidth}×${v.videoHeight} · 时长 ${V.dur.toFixed(2)}s · 浏览器解码`;
+    buildTimeline();
+    setStatus(`已加载：${V.dur.toFixed(2)}s，点「▶ 处理」开始`);
+  };
+  v.onerror = () => setStatus('视频解码失败（编码/容器不支持；MOV 建议转 MP4，用 Chrome/Edge）', true);
+}
+
+/* --- 时间轴（粗：显示区间） --- */
+function buildTimeline() {
+  const tl = $('timeline'); tl.textContent = '';
+  const bar = document.createElement('canvas'); bar.width = 900; bar.height = 26; bar.style.width='100%';
+  tl.appendChild(bar);
+  drawTimeline();
+}
+function drawTimeline() {
+  const bar = $('timeline').firstChild; if (!bar || !V.dur) return;
+  const c = bar.getContext('2d'); c.clearRect(0,0,bar.width,bar.height);
+  const t0 = +$('t0').value||0, t1 = +$('t1').value||V.dur;
+  c.fillStyle = '#2a2e35'; c.fillRect(0,0,bar.width,bar.height);
+  c.fillStyle = '#4da3ff55'; c.fillRect(Math.max(0,t0/V.dur)*bar.width,0, Math.min(V.dur,t1)-Math.max(0,t0),0.75? (Math.min(V.dur,t1)-Math.max(0,t0))/V.dur*bar.width : 0);
+  c.fillRect(Math.max(0,t0/V.dur)*bar.width,0,(Math.min(V.dur,t1)-Math.max(0,t0))/V.dur*bar.width,bar.height);
+  c.strokeStyle = '#d8dde6'; c.beginPath();
+  c.moveTo(Math.max(0,t0/V.dur)*bar.width,0); c.lineTo(Math.max(0,t0/V.dur)*bar.width,bar.height);
+  c.moveTo(Math.min(V.dur,t1)/V.dur*bar.width,0); c.lineTo(Math.min(V.dur,t1)/V.dur*bar.width,bar.height);
+  c.stroke();
+}
+
+/* --- 抽帧: 区间 t0~t1 每秒 fps 帧，均匀采样 --- */
+async function extractFrames() {
+  const v = V.video; if (!v) return [];
+  const t0 = Math.max(0, +$('t0').value||0), t1 = Math.min(V.dur, +$('t1').value||V.dur);
+  const fps = Math.max(1, +$('fps').value || 24);
+  const n = Math.max(1, Math.round((t1 - t0) * fps));
+  const frames = []; setStatus(`抽帧中：${n} 帧（${fmtT(t0)}~${fmtT(t1)} @ ${fps}fps）…`);
+  const waitSeek = t => new Promise(res => { v.onseeked = () => res(); v.currentTime = t; setTimeout(res, 800); });
+  for (let i=0; i<n; i++) {
+    const t = t0 + (i+0.5) * (t1-t0)/n;
+    await waitSeek(Math.min(t, V.dur - 0.001));
+    frames.push(frameToImageData(v));
+    if (i % 8 === 0) { $('status').textContent = `抽帧 ${i+1}/${n}…`; await new Promise(r=>requestAnimationFrame(r)); }
+  }
+  return frames;
+}
+
+function frameToImageData(src) {
+  const w = src.videoWidth || src.naturalWidth || src.width;
+  const h = src.videoHeight || src.naturalHeight || src.height;
+  const c = document.createElement('canvas'); c.width=w; c.height=h;
+  const cc = c.getContext('2d', { willReadFrequently:true });
+  cc.drawImage(src,0,0);
+  return cc.getImageData(0,0,w,h);
+}
+
+/* --- 处理管线：标准化一帧（复制 ImageData） --- */
+function processFrame(id) {
+  let img = { width:id.width, height:id.height, data:new Uint8ClampedArray(id.data) };
+  const key = $('key').value;
+  if (key === 'green' || (key === 'auto' && detectGreen(img))) img = chromaKey(img);
+  const ow = Math.max(1,+$('ow').value||64), oh = Math.max(1,+$('oh').value||64);
+  img = downsampleContain(img, ow, oh);
+  return img;
+}
+
+/* 处理全部帧（跨帧共享色板） */
+function processAll(frames) {
+  setStatus('标准化处理中…');
+  const k = +$('colors').value || 0;
+  const raw = [];
+  for (const f of frames) { const im = { width:f.width, height:f.height, data:new Uint8ClampedArray(f.data) };
+    let img = im;
+    const key = $('key').value;
+    if (key === 'green' || (key === 'auto' && detectGreen(img))) img = chromaKey(img);
+    const ow=Math.max(1,+$('ow').value||64), oh=Math.max(1,+$('oh').value||64);
+    img = downsampleContain(img, ow, oh);
+    raw.push(img);
+  }
+  const outline = $('outline').checked, ocol = $('outlineColor').value;
+  let out = raw;
+  if (k > 0) {
+    const pooled = new Map();
+    for (const f of raw) { const d=f.data; for (let i=0;i<d.length;i+=4){ if(!d[i+3])continue;
+      const key2=(d[i]<<16)|(d[i+1]<<8)|d[i+2]; pooled.set(key2,(pooled.get(key2)||0)+1); } }
+    const items = Array.from(pooled, ([k2,n]) => [(k2>>16)&255,(k2>>8)&255,k2&255,n]);
+    const kk = Math.max(1, k - (outline?1:0));
+    const pal = items.length ? buildPaletteK(items, Math.min(kk, items.length)) : [];
+    out = raw.map(f => pal.length ? mapToPalette(f, pal) : f);
+  }
+  if (outline) {
+    const oc = hexToRgb(ocol);
+    out = out.map(f => { const d = new Uint8ClampedArray(f.data), w=f.width,h=f.height;
+      const op=(x,y)=> x>=0&&y>=0&&x<w&&y<h&&d[(y*w+x)*4+3]>=128;
+      for (let y=0;y<h;y++) for (let x=0;x<w;x++){ const i=(y*w+x)*4;
+        if (d[i+3]>=128 && (!op(x-1,y)||!op(x+1,y)||!op(x,y-1)||!op(x,y+1))) { d[i]=oc[0];d[i+1]=oc[1];d[i+2]=oc[2]; } }
+      return { width:w, height:h, data:d }; });
+  }
+  return out;
+}
+
+function hexToRgb(h) { return [parseInt(h.slice(1,3),16), parseInt(h.slice(3,5),16), parseInt(h.slice(5,7),16)]; }
+
+/* --- 预览：canvas 播放已处理帧 --- */
+function renderFrame(f, scale) {
+  const stage = $('vstage'); let cv = stage.querySelector('canvas');
+  if (!cv) { cv = document.createElement('canvas'); stage.replaceChild(cv, $('prev')); stage.insertBefore(cv, stage.firstChild); }
+  cv.width = f.width; cv.height = f.height;
+  const c = cv.getContext('2d'); c.imageSmoothingEnabled = false;
+  c.clearRect(0,0,cv.width,cv.height);
+  c.drawImage(imageDataToCanvas(f), 0, 0, f.width*scale, f.height*scale);
+  cv.style.width = (f.width*scale)+'px'; cv.style.height=(f.height*scale)+'px';
+}
+function imageDataToCanvas(id) {
+  const c = document.createElement('canvas'); c.width=id.width; c.height=id.height;
+  c.getContext('2d').putImageData(new ImageData(id.data, id.width, id.height),0,0);
+  return c;
+}
+
+function updateStats() {
+  const t = $('fstats'); t.innerHTML = '';
+  let two = true; const cols = new Set();
+  for (const f of V.processed) { const a = analyzeId(f); if (!a.alphaTwo) two=false; a.colors && cols.add(a.colors); }
+  const worst = V.processed.length ? Math.max(...V.processed.map(f=>analyzeId(f).colors)) : 0;
+  const rows = [
+    ['帧数', V.processed.length],
+    ['帧尺寸', V.processed.length ? `${V.processed[0].width}×${V.processed[0].height}` : '-'],
+    ['色数（最大帧）', V.processed.length ? worst : '-'],
+    ['alpha 两态', two ? '✅' : '❌'],
+  ];
+  for (const [k,v] of rows) { const tr=document.createElement('tr'); tr.innerHTML=`<td>${k}</td><td>${v}</td>`; t.appendChild(tr); }
+}
+
+/* --- 导出 --- */
+function dataUrl(frame) { return imageDataToCanvas(frame).toDataURL('image/png'); }
+function download(name, url) { const a=document.createElement('a'); a.href=url; a.download=name; a.click(); }
+
+function exportHtml() {
+  const frames = V.processed; const w=frames[0].width,h=frames[0].height;
+  const list = frames.map(f => dataUrl(f));
+  const script = "<"+"script>" +
+    "const F=" + JSON.stringify(list) + ",cv=document.getElementById('cv'),cc=cv.getContext('2d');" +
+    "let i=0,timer=null,playing=false;cc.imageSmoothingEnabled=false;" +
+    "function draw(){const im=new Image();im.onload=()=>{cc.clearRect(0,0,cv.width,cv.height);cc.drawImage(im,0,0)};im.src=F[i];document.getElementById('fi').textContent=(i+1)+'/'+F.length;}" +
+    "function step(){draw();i=(i+1)%F.length;}" +
+    "function play(){if(playing)return;playing=true;draw();timer=setInterval(step,1000/(+document.getElementById('fps').value||12));document.getElementById('pl').textContent='⏸';}" +
+    "function pause(){playing=false;clearInterval(timer);document.getElementById('pl').textContent='▶';}" +
+    "document.getElementById('pl').onclick=()=>playing?pause():play();" +
+    "document.getElementById('prev').onclick=()=>{pause();i=(i-1+F.length)%F.length;draw();};" +
+    "document.getElementById('next').onclick=()=>{pause();i=(i+1)%F.length;draw();};" +
+    "document.getElementById('z').oninput=e=>{const s=+e.target.value;cv.style.width=(cv.width*s)+'px';cv.style.height=(cv.height*s)+'px';};" +
+    "draw();play();" +
+    "<"+"/script>";
+  const frameCount = frames.length;
+  const html = '<!DOCTYPE html><html><head><meta charset="utf-8"><title>Pixel Animation</title>' +
+    '<style>body{background:#111;color:#eee;font-family:system-ui;display:flex;flex-direction:column;align-items:center;gap:10px;padding:20px}' +
+    'canvas{image-rendering:pixelated;background:repeating-conic-gradient(#333 0 25%,#222 0 50%) 0 0/24px 24px}' +
+    '.controls{display:flex;gap:8px;flex-wrap:wrap}button{background:#333;color:#eee;border:1px solid #555;padding:4px 10px;cursor:pointer}</style></head><body>' +
+    '<h3>Pixel Animation（' + frameCount + ' 帧 / ' + w + '×' + h + '）</h3><canvas id="cv" width="' + w + '" height="' + h + '"></canvas>' +
+    '<div class="controls"><button id="pl">⏸</button><label>FPS</label><input id="fps" type="number" value="12" min="1" style="width:56px">' +
+    '<label>缩放</label><input id="z" type="range" min="1" max="8" value="4" style="width:100px"><button id="prev">◀</button><button id="next">▶</button><span id="fi"></span></div>' +
+    script + '</body></html>';
+  download('animation.html', 'data:text/html;charset=utf-8,' + encodeURIComponent(html));
+}
+
+function exportGif() {
+  const frames = V.processed, w=frames[0].width, h=frames[0].height;
+  const canvas = document.createElement('canvas'); canvas.width=w; canvas.height=h;
+  const cc = canvas.getContext('2d'); cc.imageSmoothingEnabled=false;
+  const gif = new GIFEncoder({ width:w, height:h }); gif.begin();
+  for (const f of frames) { cc.clearRect(0,0,w,h); cc.drawImage(imageDataToCanvas(f),0,0,w,h);
+    gif.addFrame(cc.getImageData(0,0,w,h)); }
+  gif.finish();
+  download('animation.gif', gif.blobURL());
+}
+
+function exportSheet() {
+  const frames=V.processed,w=frames[0].width,h=frames[0].height;
+  const c=document.createElement('canvas');c.width=w*frames.length;c.height=h;
+  const cc=c.getContext('2d');cc.imageSmoothingEnabled=false;
+  frames.forEach((f,i)=>cc.drawImage(imageDataToCanvas(f), i*w,0));
+  c.toBlob(b=>{ const u=URL.createObjectURL(b); const a=document.createElement('a');a.href=u;a.download='animation_sheet.png';a.click(); setTimeout(()=>URL.revokeObjectURL(u),500); }, 'image/png');
+}
+
+function exportPngs() {
+  // 逐个下载（浏览器限制同批下载数时提示）
+  let i=0;
+  const next=()=>{ if(i>=V.processed.length) return;
+    const a=document.createElement('a'); a.href=dataUrl(V.processed[i]); a.download=`frame_${String(i).padStart(3,'0')}.png`; a.click(); i++;
+    if (i<60) setTimeout(next,120); else setStatus('已触发 60 帧下载；剩余帧请用「导出 ZIP」打包', false); };
+  next();
+}
+
+/* 最小 ZIP（STORE 无压缩）：PNG 帧打包为一个 zip 下载（无需第三方库） */
+function exportZip() {
+  const files = V.processed.map((f,i) => ({ name:`frame_${String(i).padStart(3,'0')}.png`, blob: imageDataToCanvas(f).toDataURL('image/png') }));
+  const chunks = [];
+  let offset = 0;
+  const enc = new TextEncoder();
+  const central = [];
+  const crcTable = [];
+  for (let n=0;n<256;n++){ let c=n; for(let k=0;k<8;k++) c = (c&1) ? (0xEDB88320 ^ (c>>>1)) : (c>>>1); crcTable[n]=c>>>0; }
+  const crc32 = (bytes) => { let c=0xFFFFFFFF; for (const b of bytes) c = crcTable[(c^b)&255] ^ (c>>>8); return (c^0xFFFFFFFF)>>>0; };
+  for (const f of files) {
+    const data = atob(f.blob.split(',')[1]);
+    const bin = new Uint8Array(data.length);
+    for (let i=0;i<data.length;i++) bin[i]=data.charCodeAt(i);
+    const name = enc.encode(f.name);
+    const crc = crc32(bin);
+    const lh = new Uint8Array(30+name.length);
+    const dv = new DataView(lh.buffer);
+    dv.setUint32(0,0x04034b50,true); dv.setUint16(4,20,true); dv.setUint16(6,0,true); dv.setUint16(8,8,true);
+    dv.setUint32(14,crc,true); dv.setUint32(18,bin.length,true); dv.setUint32(22,bin.length,true);
+    dv.setUint16(26,name.length,true); dv.setUint16(28,0,true);
+    lh.set(name,30);
+    chunks.push(lh, bin);
+    const ch = new Uint8Array(46+name.length);
+    const cdv = new DataView(ch.buffer);
+    cdv.setUint32(0,0x02014b50,true); cdv.setUint16(4,20,true); cdv.setUint16(6,20,true);
+    cdv.setUint32(14,crc,true); cdv.setUint32(18,bin.length,true); cdv.setUint32(22,bin.length,true);
+    cdv.setUint16(26,name.length,true);
+    cdv.setUint32(42,offset,true);
+    ch.set(name,46);
+    central.push(ch);
+    offset += lh.length + bin.length;
+  }
+  const cenSize = central.reduce((s,c)=>s+c.length,0);
+  const eocd = new Uint8Array(22);
+  const edv = new DataView(eocd.buffer);
+  edv.setUint32(0,0x06054b50,true); edv.setUint16(8,files.length,true); edv.setUint16(10,files.length,true);
+  edv.setUint32(12,cenSize,true); edv.setUint32(16,offset,true);
+  const blob = new Blob([...chunks, ...central, eocd], {type:'application/zip'});
+  const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='animation_frames.zip'; a.click();
+  setTimeout(()=>URL.revokeObjectURL(a.href), 500);
+}
+
+/* GIF 编码器（最小实现：全局调色板 + LZW）——仅支持 256 色内，帧 64×64 够用 */
+class GIFEncoder {
+  constructor({width,height}) { this.w=width; this.h=height; this.frames=[]; }
+  begin() {}
+  addFrame(imgData) { this.frames.push(imgData); }
+  finish() { this.blob = this.#encode(); }
+  blobURL() { return URL.createObjectURL(this.blob); }
+  #encode() { return gifEncode(this.w, this.h, this.frames); }
+}
+
+/* GIF89a 编码（LZW + 全局调色板）：帧序列 → Blob。
+   取自像素画工具常用实现（桌面端有完整 GIF 导出；此处嵌入浏览器端等价物，
+   支持透明像素转单色、≤256 色自动量化到最近色）。 */
+function gifEncode(w, h, frameDataArr) {
+  // 收集全部像素颜色（不透明）→ 全局调色板（最多 255 色 + 1 透明索引 0）
+  const colorCount = new Map();
+  for (const fd of frameDataArr) {
+    const d = fd.data;
+    for (let i=0;i<d.length;i+=4) { if (d[i+3] < 128) continue;
+      const k=(d[i]<<16)|(d[i+1]<<8)|d[i+2]; colorCount.set(k,(colorCount.get(k)||0)+1); }
+  }
+  const all = Array.from(colorCount, ([k,n])=>[(k>>16)&255,(k>>8)&255,k&255]);
+  let pal;
+  if (all.length <= 255) pal = all;
+  else {
+    // 简化平均分桶：取出现最多的 255 色（像素动画常见 ≤64 色，此分支极少触发）
+    pal = all.sort((a,b)=>(colorCount.get((b[0]<<16)|(b[1]<<8)|b[2])||0)-(colorCount.get((a[0]<<16)|(a[1]<<8)|a[2])||0)).slice(0,255);
+  }
+  // 索引表：0=透明，1..=颜色
+  const idxOf = new Map();
+  pal.forEach((c,i)=>idxOf.set((c[0]<<16)|(c[1]<<8)|c[2], i+1));
+  // 色表字节数补齐到 2 的幂
+  const tblSize = 1 << Math.ceil(Math.log2(pal.length*2));  // 含透明位的表
+  const gct = new Uint8Array(tblSize*3);
+  gct.set(new Uint8Array([0,0,0]), 0);   // 索引 0 透明
+  pal.forEach((c,i)=>{ gct.set(c, (i+1)*3); });
+
+  const bytes = [0x47,0x49,0x46,0x38,0x39,0x61];  // GIF89a
+  const put16 = v => { bytes.push(v&255, v>>8); };
+  put16(w); put16(h);
+  const gctSize = Math.log2(tblSize/1) - 1;
+  bytes.push(0x80 | (gctSize & 0x07));   // 全局色表
+  bytes.push(0, 0, 0);
+  for (const b of gct) bytes.push(b);
+
+  // 每帧：GCE(透明) + 图像描述 + LZW 数据
+  const lzwMin = 2;
+  for (const fd of frameDataArr) {
+    const d = fd.data;
+    // 帧像素 → 索引
+    const idx = new Uint8Array(w*h);
+    for (let i=0;i<d.length;i+=4) {
+      const p = i/4;
+      if (d[i+3] < 128) { idx[p]=0; continue; }
+      const k=(d[i]<<16)|(d[i+1]<<8)|d[i+2];
+      idx[p] = idxOf.get(k) || 1;
+    }
+    // GCE：透明索引 0，disposal=1
+    bytes.push(0x21,0xF9,0x04,0x01,0,0,0,0,0x00);
+    // 图像描述
+    bytes.push(0x2C); put16(0); put16(0); put16(w); put16(h); bytes.push(gctSize & 0x07);
+    // LZW 压缩子块
+    const lzw = lzwEncode(idx, lzwMin);
+    bytes.push(lzwMin);
+    for (let i=0;i<lzw.length;i+=255) { const chunk=lzw.slice(i,i+255); bytes.push(chunk.length); for (const b of chunk) bytes.push(b); }
+    bytes.push(0);
+  }
+  bytes.push(0x3B);  // trailer
+  return new Blob([new Uint8Array(bytes)], {type:'image/gif'});
+}
+
+function lzwEncode(indices, minCodeSize) {
+  const clearCode = 1 << minCodeSize, eoiCode = clearCode+1;
+  let out = [], cur = [], codeSize = minCodeSize+1;
+  const dict = new Map();
+  const codeOf = k => dict.get(k);
+  function resetDict(){ dict.clear(); for(let i=0;i<clearCode;i++) dict.set(String.fromCharCode(i), i); codeSize = minCodeSize+1; }
+  function emit(code, sz) {
+    // 写入 LSB-first 位流
+    cur.push(code);
+    out = cur; cur = [];
+    return out, cur;
+  }
+  // 简单位流缓冲
+  let bitBuf=0, bitCnt=0;
+  const outBytes=[];
+  function writeCode(code, sz) { bitBuf |= code << bitCnt; bitCnt += sz; while (bitCnt >= 8) { outBytes.push(bitBuf & 255); bitBuf >>= 8; bitCnt -= 8; } }
+  resetDict();
+  let nextCode = eoiCode+1;
+  writeCode(clearCode, codeSize);
+  let prev = null;
+  for (let i=0;i<indices.length;i++) {
+    const k = indices[i];
+    if (prev === null) { prev = String.fromCharCode(k); continue; }
+    const key = prev + String.fromCharCode(k);
+    if (dict.has(key)) { prev = key; continue; }
+    writeCode(codeOf(prev), codeSize);
+    dict.set(key, nextCode++);
+    if (nextCode === (1 << codeSize) && codeSize < 12) codeSize++;
+    else if (nextCode >= 4096) { writeCode(clearCode, codeSize); resetDict(); nextCode = eoiCode+1; }
+    prev = String.fromCharCode(k);
+  }
+  if (prev !== null) writeCode(codeOf(prev), codeSize);
+  writeCode(eoiCode, codeSize);
+  if (bitCnt) outBytes.push(bitBuf & 255);
+  return outBytes;
+}
+
+/* ─── 主逻辑绑定 ─── */
+function init() {
+  $('drop').addEventListener('dragover', e => { e.preventDefault(); $('drop').classList.add('hover'); });
+  $('drop').addEventListener('dragleave', () => $('drop').classList.remove('hover'));
+  $('drop').addEventListener('drop', e => { e.preventDefault(); $('drop').classList.remove('hover'); const f=e.dataTransfer.files[0]; if (f) loadVideoFile(f); });
+  $('file').onchange = e => { if (e.target.files[0]) loadVideoFile(e.target.files[0]); };
+  $('setT0').onclick = () => { if (V.video){ $('t0').value = (V.video.currentTime||0).toFixed(2); drawTimeline(); } };
+  $('setT1').onclick = () => { if (V.video){ $('t1').value = (V.video.currentTime||0).toFixed(2); drawTimeline(); } };
+  $('t0').onchange = drawTimeline; $('t1').onchange = drawTimeline;
+  document.querySelectorAll('[data-fps]').forEach(b => b.onclick = () => { $('fps').value = b.dataset.fps; });
+
+  $('pbtn').onclick = async () => {
+    if (!V.video) { setStatus('请先加载视频', true); return; }
+    const frames = await extractFrames();
+    if (!frames.length) { setStatus('未抽到帧（检查区间/时长）', true); return; }
+    V.processed = processAll(frames);
+    V.raw = frames;
+    V.fidx = 0;
+    $('frameIdx').max = V.processed.length-1;
+    $('frameNo').textContent = `1/${V.processed.length}`;
+    renderFrame(V.processed[0], +$('zoomN').value || 4);
+    updateStats();
+    buildExports();
+    setStatus(`完成：${V.processed.length} 帧（${V.processed[0].width}×${V.processed[0].height}）`);
+  };
+
+  $('playbtn').onclick = () => {
+    if (!V.processed.length) return;
+    if (V.playing) { V.playing=false; clearInterval(V.timer); $('playbtn').textContent='▶ 播放'; return; }
+    V.playing=true; $('playbtn').textContent='⏸ 暂停';
+    const fps = Math.max(1,+$('fps').value||12);
+    V.timer = setInterval(()=>{ V.fidx=(V.fidx+1)%V.processed.length; showFrame(V.fidx); }, 1000/fps);
+  };
+
+  function showFrame(i) { V.fidx=i; renderFrame(V.processed[i], +$('zoomN').value||4); $('frameIdx').value=i; $('frameNo').textContent=(i+1)+'/'+V.processed.length; }
+  $('frameIdx').oninput = e => { showFrame(+e.target.value); };
+  $('zoom').oninput = e => { $('zoomN').value=e.target.value; if (V.processed.length) renderFrame(V.processed[V.fidx], +e.target.value); };
+  $('zoomN').oninput = e => { $('zoom').value=e.target.value; if (V.processed.length) renderFrame(V.processed[V.fidx], +e.target.value); };
+
+  // 参数修改 → 自动重处理（若已处理过）
+  ['t0','t1','fps','ow','oh','colors','fit','outline','outlineColor','key'].forEach(id => {
+    $(id).onchange = () => { if (V.processed.length) $('pbtn').click(); drawTimeline(); };
+  });
+
+  function buildExports() {
+    const box = $('exports'); box.innerHTML='';
+    const defs = [
+      ['expHtml', 'HTML 播放器', exportHtml],
+      ['expGif', 'GIF', exportGif],
+      ['expSheet', 'Sprite Sheet', exportSheet],
+      ['expPngs', 'PNG 序列', exportPngs],
+      ['dlZip', 'ZIP（PNG 打包）', exportZip],
+    ];
+    for (const [id,label,fn] of defs) {
+      const b = document.createElement('button');
+      b.textContent = label;
+      b.onclick = () => { try { fn(); setStatus(`已导出：${label}`); } catch(e) { setStatus('导出失败: '+e.message, true); } };
+      box.appendChild(b);
+    }
+    $('expNote').textContent = '点上述按钮逐个导出（浏览器下载）。';
+  }
+}
+document.addEventListener('DOMContentLoaded', init);
+</script>
+</body>
+</html>
