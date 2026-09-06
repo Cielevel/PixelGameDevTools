@@ -19,6 +19,7 @@
 | `generation/` | **纯程序化生成素材方案**（独立类别）：`canvas.py` 绘制基元 / `style_kit.py` 风格基准库 / `gen_*.py` 资产生成脚本（按约定自建）；类别总纲、脚本约定与骨架见其 `README.md`，后续「纯程序验证素材」功能将与此类别并列 |
 | `palette.py` | 调色板 JSON 读写（`assets/palettes/`）、最近色映射（OKLab 感知色距）、`quantize` 归入色板、`enforce_alpha` 两态化、色条 PNG 导出 |
 | `standardize.py` | AI 像素图标准化：亮度梯度自相关检测逻辑网格（含相位）→ 单元内鲁棒采样（众数分桶+mean-shift / 逐通道中位数）→ OKLab 加权 k-means 量化 / 映射工程色板 → 四角背景检测（边界连通清除）；多输入自动共享网格与色板（防闪烁）。源自 `ai-pixel-art-standardization-handoff/` 交接包升级建议，实测报告见其 `report-standardization-bench.md` |
+| `video.py` | **AI 像素视频标准化**：ffmpeg 抽帧 → 角色区裁剪（自动/fixed）→ 像素化降采样 → 跨帧共享色板 OKLab 量化 → 背景透明化 → 可选 1px 描边 → 帧序列+GIF+HTML 播放器。AI 动态视频（平滑运动+压缩）无稳定逻辑网格，默认走降采样而非网格还原 |
 | `anim.py` | 序列帧 I/O、sprite sheet 拼合/切分、GIF 导出、自包含 HTML 播放器、放大逐帧检查图（可叠像素网格坐标）、洋葱皮静态检查图 |
 | `check.py` | 程序化自检：尺寸 / 模式 / alpha 两态 / 色数 / 调色板 / 帧组脚底与水平中心对齐 / 动画一致性（死帧 P1、跳变与循环突断 P2）/ 孤立像素 / 连通域计数（默认信息，`--components-max` 升门禁）；帧组按文件名前缀自动聚合，整目录混检互不误报；另提供 `frame_stats` 动画统计（不设门禁） |
 | `layout.py` | sprites 子目录布局约定：按资产名前缀映射子目录（`sprite_dir`），前缀表按工程清单修订 |
@@ -64,6 +65,11 @@ python3 tools/pixelart/pixcli.py quantize some.png --palette assets/palettes/<�
 python3 tools/pixelart/pixcli.py standardize flow_export.jpg -o out_dir/
 python3 tools/pixelart/pixcli.py standardize f0.jpg f1.jpg f2.jpg -o out_dir/ --colors 16
 python3 tools/pixelart/pixcli.py standardize f0.jpg -o out.png --grid 32 --sampling median --colors 0
+
+# AI 像素视频标准化：抽帧 → 裁剪 → 缩到 64×64 → 跨帧 16 色量化 → 透明背景 → 描边 → 帧/GIF/HTML
+# （AI 动态视频无稳定网格，默认降采样；需 ffmpeg；--fps 可重采样）
+python3 tools/pixelart/pixcli.py video-std ai_video.mp4 -o out_dir/ --size 64x64 --outline '#182b54'
+python3 tools/pixelart/pixcli.py video-std ai_video.mp4 -o out_dir/ --fps 12 --crop fixed --box 466,148,746,554
 
 # 像素级比对：文件↔文件 或 目录↔目录；一致 exit 0，差异报数量/bbox/首几处坐标（重构零差异验证）
 python3 tools/pixelart/pixcli.py diff assets/sprites/mob /tmp/regen_mob

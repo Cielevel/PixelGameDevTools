@@ -15,6 +15,7 @@ import anim
 import check as checkmod
 import palette as palmod
 import standardize as stdmod
+import video as vidmod
 from PIL import Image
 
 
@@ -168,6 +169,26 @@ def cmd_standardize(args):
         rep.get("quantize") or "-"))
     for dst in dsts:
         print("  → {}".format(dst))
+    return 0
+
+
+def cmd_video_std(args):
+    """AI 像素视频标准化：抽帧 → 裁剪/缩放 → 跨帧共享量化 → 帧/GIF/HTML。"""
+    box = args.box if args.box else None
+    rep = vidmod.video_standardize(
+        args.video, args.out,
+        fps=args.fps, size=args.size, crop=args.crop, box=box,
+        bg_tol=args.bg_tol, colors=args.colors, palette=args.palette,
+        outline=args.outline, make_gif=not args.no_gif, make_html=not args.no_html,
+        keep_frames=not args.no_frames, grid=args.grid, sampling=args.sampling,
+        bg=args.bg)
+    print("[video-std] {} {}x{} {}fps {} → {} 帧 {}".format(
+        os.path.basename(args.video), rep["width"], rep["height"], rep["fps"],
+        rep["codec"], rep["frames_used"],
+        "裁剪{}".format(rep["crop"]) if rep.get("crop") else "不裁剪"))
+    print("  → {}".format(rep["out"]))
+    print("  → 量化: {}；输出色数 {}".format(
+        rep.get("quantize") or "-", rep.get("colors_out")))
     return 0
 
 
@@ -427,6 +448,28 @@ def main(argv=None):
     p.add_argument("a")
     p.add_argument("b")
     p.set_defaults(fn=cmd_diff)
+
+    p = sub.add_parser("video-std",
+                       help="AI 像素视频标准化：ffmpeg 抽帧 → 角色区裁剪 → 像素化降采样 → 跨帧共享 OKLab 量化 → 帧序列+GIF+HTML 播放器（AI 动态视频无稳定网格，默认走降采样而非网格还原）")
+    p.add_argument("video", help="输入视频（mp4/webm/mov；需要 ffmpeg）")
+    p.add_argument("-o", "--out", required=True, help="输出目录（帧序列 <名>_NN.png + <名>.gif + <名>.html）")
+    p.add_argument("--fps", type=float, default=None, help="重采样帧率（默认视频原生；如 24 源 → 12 减半）")
+    p.add_argument("--size", type=_parse_size, default=None, help="目标像素尺寸 WxH（如 64x64；默认不缩放仅量化）")
+    p.add_argument("--crop", choices=("auto", "none", "fixed"), default="auto",
+                   help="auto=全程合并内容 bbox 裁剪（默认）| none=不裁剪 | fixed=用 --box")
+    p.add_argument("--box", default=None, help="固定裁剪框 x0,y0,x1,y1（配合 --crop fixed）")
+    p.add_argument("--bg-tol", type=int, default=60, help="背景判定亮度差阈值")
+    p.add_argument("--bg", default="auto", help="背景透明化：auto（四角众数判定，默认）| keep（不透明化）| #rrggbb")
+    p.add_argument("--colors", type=int, default=16, help="目标色数（跨帧合并聚类）；0=不量化")
+    p.add_argument("--palette", help="映射到工程调色板 JSON（优先于 --colors）")
+    p.add_argument("--grid", default=None, help="指定逻辑网格 N（仅当视频确为网格放大时；默认 None=像素化降采样）")
+    p.add_argument("--sampling", choices=("mode", "median"), default="mode",
+                   help="网格采样方式（--grid 时生效）")
+    p.add_argument("--outline", default=None, help="1px 内描边色 #rrggbb（可选，逐帧描边）")
+    p.add_argument("--no-gif", action="store_true", help="不导出 GIF")
+    p.add_argument("--no-html", action="store_true", help="不导出 HTML 播放器")
+    p.add_argument("--no-frames", action="store_true", help="不导出帧序列 PNG（仅 GIF/HTML）")
+    p.set_defaults(fn=cmd_video_std)
 
     p = sub.add_parser("scale", help="nearest 整数倍放大（预览用）")
     p.add_argument("image")

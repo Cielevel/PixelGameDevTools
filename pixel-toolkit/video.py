@@ -1,0 +1,332 @@
+#!/usr/bin/env python3
+"""视频标准化：AI 生成像素视频 → 标准像素动画帧序列。
+
+背景（2026-09-06 实测 origin_video.mp4 定稿）：
+- AI 生成的运动视频（如即梦 mp4，1280x720@24fps）是**平滑动画 + 深度压缩**，
+  帧间无稳定逻辑网格（自动网格检测 conf 0.57~0.70 每帧乱跳）——**网格还原不适用**；
+  正确管线是「抽帧 → 角色区裁剪 → 整数降采样 → 跨帧共享 OKLab 量化 → 描边归一」。
+- 像素风角色视频本身已是像素块（块约 4.4px），缺的是稳定帧提取、尺寸归一、
+  跨帧色板一致（防闪烁）与输出形态（帧序列/GIF/HTML 播放器）。
+
+依赖：ffmpeg/ffprobe 在 PATH 中（视频解码与抽帧）。
+"""
+from __future__ import annotations
+
+import os
+import subprocess
+import sys
+from collections import Counter
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+import anim
+import standardize as stdmod
+from PIL import Image
+
+
+# ------------------------------------------------------------ ffmpeg 封装 ----
+def ffprobe_info(path):
+    """ffprobe → (width, height, fps, duration_s, frames)。失败抛 RuntimeError。"""
+    try:
+        out = subprocess.run(
+            ["ffprobe", "-v", "error", "-select_streams", "v:0",
+             "-show_entries", "stream=width,height,r_frame_rate,nb_frames,duration,codec_name",
+             "-of", "default=noprint_wrappers=1", path],
+            capture_output=True, text=True, check=True).stdout
+    except (subprocess.CalledProcessError, FileNotFoundError) as e:
+        raise RuntimeError(
+            "ffprobe 不可用（需要 ffmpeg 全家桶；macOS: brew install ffmpeg）: {}".format(e))
+    info = {}
+    for line in out.splitlines():
+        if "=" in line:
+            k, v = line.split("=", 1)
+            info[k.strip()] = v.strip()
+    w = int(info.get("width", 0))
+    h = int(info.get("height", 0))
+    r = info.get("r_frame_rate", "0/1")
+    num, _, den = r.partition("/")
+    fps = float(num) / float(den) if den and float(den) else 0.0
+    dur = float(info.get("duration", 0) or 0)
+    frames = int(info.get("nb_frames", 0) or 0)
+    codec = info.get("codec_name", "?")
+    if not w or not h:
+        raise RuntimeError("ffprobe 未解析出视频尺寸: {}".format(path))
+    return {"width": w, "height": h, "fps": fps, "duration": dur,
+            "frames": frames, "codec": codec}
+
+
+def extract_frames(video, out_dir, fps=None, start=None, end=None):
+    """视频 → PNG 帧序列（原生分辨率）。返回帧文件列表（按时间序）。
+
+    fps=None 用视频原生帧率；fps=N 重采样（抽/并帧，如 24→12 减半）。
+    """
+    os.makedirs(out_dir, exist_ok=True)
+    from subprocess import run
+    cmd = ["ffmpeg", "-y", "-v", "error", "-i", video]
+    if start is not None and end is not None:
+        cmd += ["-ss", str(start), "-t", str(end - start)]
+    elif start is not None:
+        cmd += ["-ss", str(start)]
+    if fps is not None:
+        cmd += ["-r", str(fps)]
+        # -r 已做帧率重采样（输出每帧间隔 1/fps），不叠加 -fps_mode（会冲突）
+    else:
+        cmd += ["-fps_mode", "vfr"]   # 原生帧率时按实际帧输出（ffmpeg 9 无 -vsync）
+    # 输出为 f%04d.png（从 0001 起）
+    pat = os.path.join(out_dir, "f%04d.png")
+    cmd += [pat]
+    r = run(cmd, capture_output=True, text=True)
+    if r.returncode != 0:
+        raise RuntimeError("ffmpeg 抽帧失败: {}".format(r.stderr.strip()[-300:]))
+    frames = sorted(f for f in os.listdir(out_dir) if f.endswith(".png"))
+    if not frames:
+        raise RuntimeError("ffmpeg 未抽出任何帧")
+    return [os.path.join(out_dir, f) for f in frames]
+
+
+# ------------------------------------------------------------ 内容分析 ----
+def content_bbox(im, bg_tol=60, bg=None, step=2):
+    """内容包围盒（与背景差异明显的像素）。
+
+    bg 可指定 (r,g,b)；None 时取四角众数为背景。
+    返回 (x0,y0,x1,y1) 或 None（无内容）。
+    """
+    im = im.convert("RGB")
+    px = im.load()
+    w, h = im.size
+    if bg is None:
+        corners = [px[0, 0], px[w - 1, 0], px[0, h - 1], px[w - 1, h - 1]]
+        bg = Counter(corners).most_common(1)[0][0]
+    xs, ys = [], []
+    for y in range(0, h, step):
+        for x in range(0, w, step):
+            c = px[x, y]
+            if abs(c[0] - bg[0]) + abs(c[1] - bg[1]) + abs(c[2] - bg[2]) > bg_tol:
+                xs.append(x)
+                ys.append(y)
+    if not xs:
+        return None
+    return (min(xs), min(ys), max(xs), max(ys))
+
+
+def merged_content_bbox(frame_paths, bg_tol=60, step=2):
+    """多帧内容 bbox 合并（全程运动范围）。取所有帧内容并集的包围盒。"""
+    all_x0 = all_y0 = None
+    all_x1 = all_y1 = -1
+    for p in frame_paths:
+        im = Image.open(p)
+        b = content_bbox(im, bg_tol=bg_tol, step=step)
+        if not b:
+            continue
+        x0, y0, x1, y1 = b
+        all_x0 = x0 if all_x0 is None else min(all_x0, x0)
+        all_y0 = y0 if all_y0 is None else min(all_y0, y0)
+        all_x1 = max(all_x1, x1)
+        all_y1 = max(all_y1, y1)
+    if all_x0 is None:
+        return None
+    return (all_x0, all_y0, all_x1, all_y1)
+
+
+# ------------------------------------------------------------ 缩放 ----
+def downsample_average(im, tw, th):
+    """面积平均降采样到 tw×th（无网格时的平滑像素化；防摩尔纹）。
+
+    与 nearest（丢信息）/ 网格采样（无网格不适用）不同，平均法保留每格主色。
+    输出 RGBA（alpha=255）供量化/描边管线直接消费。
+    """
+    im = im.convert("RGB")
+    w, h = im.size
+    out = Image.new("RGBA", (tw, th))
+    po, pi = out.load(), im.load()
+    for ty in range(th):
+        y0 = ty * h // th
+        y1 = max(y0 + 1, (ty + 1) * h // th)
+        for tx in range(tw):
+            x0 = tx * w // tw
+            x1 = max(x0 + 1, (tx + 1) * w // tw)
+            n = 0
+            r = g = b = 0
+            for yy in range(y0, y1):
+                for xx in range(x0, x1):
+                    c = pi[xx, yy]
+                    r += c[0]
+                    g += c[1]
+                    b += c[2]
+                    n += 1
+            if n:
+                po[tx, ty] = (r // n, g // n, b // n, 255)
+    return out
+
+
+def downsample_nearest(im, tw, th):
+    """nearest 整数降采样（保持硬边）；仅当原尺寸是目标的整数倍时推荐。"""
+    if tw == 0 or th == 0:
+        raise ValueError("目标尺寸不能为 0")
+    fx, fy = im.width / tw, im.height / th
+    if abs(fx - round(fx)) > 1e-6 or abs(fy - round(fy)) > 1e-6:
+        # 非整数倍：用面积平均兜底（避免最近邻取点偏移产生锯齿）
+        return downsample_average(im, tw, th)
+    return im.convert("RGBA").resize((tw, th), Image.NEAREST)
+
+
+# ------------------------------------------------------------ 背景清除 ----
+def remove_bg_connected(im, bg_rgb=None, tol=24, bg_tol=None):
+    """从画布边界 4-连通地清除背景色（被主体包住的同色格保留不开洞）。
+
+    bg_rgb=None 时取四角众数为背景；tol 为 RGB 距离（单通道累计）。
+    返回 RGBA 图（背景像素 alpha=0，其余 alpha=255）。
+    """
+    im = im.convert("RGBA")
+    w, h = im.size
+    px = im.load()
+    if bg_rgb is None:
+        from collections import Counter
+        corners = [px[0, 0][:3], px[w - 1, 0][:3], px[0, h - 1][:3], px[w - 1, h - 1][:3]]
+        bg_rgb = Counter(corners).most_common(1)[0][0]
+    tol2 = (bg_tol if bg_tol is not None else tol) * 3
+    # 迭代边界（去除四角 1px 边框后的内容余量）
+    from collections import deque
+    seen = set()
+    q = deque()
+    for x in range(w):
+        for y in (0, h - 1):
+            q.append((x, y))
+    for y in range(h):
+        for x in (0, w - 1):
+            q.append((x, y))
+    while q:
+        x, y = q.popleft()
+        if (x, y) in seen:
+            continue
+        seen.add((x, y))
+        c = px[x, y]
+        d = abs(c[0] - bg_rgb[0]) + abs(c[1] - bg_rgb[1]) + abs(c[2] - bg_rgb[2])
+        if d > tol2:
+            continue
+        px[x, y] = (0, 0, 0, 0)
+        for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+            nx, ny = x + dx, y + dy
+            if 0 <= nx < w and 0 <= ny < h and (nx, ny) not in seen:
+                q.append((nx, ny))
+    return im
+
+
+# ------------------------------------------------------------ 主流程 ----
+def video_standardize(video, out, *, fps=None, size=None, crop="auto",
+                      box=None, bg_tol=60, colors=16, palette=None,
+                      outline=None, make_gif=True, make_html=True,
+                      keep_frames=True, grid=None, sampling="mode", bg="auto"):
+    """视频标准化主流程。返回 report dict。
+
+    size: 目标像素尺寸 (tw,th)；None=不缩放（仅量化）。
+    crop: 'auto'|'none'|'fixed'；auto=全程合并 bbox 裁剪；fixed=使用 box 固定框。
+    box: (x0,y0,x1,y1) 固定裁剪框。
+    grid: 若指定（如 4），走 standardize.grid 采样路径（仅当视频确为网格放大时）；
+          默认 None = 像素化降采样路径（AI 动态视频推荐）。
+    outline: 描边色 (r,g,b) 或 None（不描边）。
+    """
+    import tempfile
+    rep = {"video": video}
+    probe = ffprobe_info(video)
+    rep.update(probe)
+    tmpdir = tempfile.mkdtemp(prefix="pixcli-vidstd-")
+    frames = extract_frames(video, tmpdir, fps=fps)
+    rep["extracted"] = len(frames)
+    rep["fps"] = fps or probe["fps"]
+
+    # 裁切
+    if crop == "auto" and box is None:
+        bb = merged_content_bbox(frames, bg_tol=bg_tol)
+        if bb:
+            box = bb
+    if box and crop in ("auto", "fixed"):
+        x0, y0, x1, y1 = box
+        frames = [Image.open(p).convert("RGB").crop((x0, y0, x1 + 1, y1 + 1)) for p in frames]
+        rep["crop"] = box
+    else:
+        frames = [Image.open(p).convert("RGB") for p in frames]
+        rep["crop"] = None
+
+    # 缩放：网格路径 or 像素化路径
+    if grid:
+        cw, ch = (int(grid), int(grid)) if isinstance(grid, int) else grid
+        from palette import Palette as _Pal
+        _pal = _Pal.load(palette) if palette else None
+        outs, srep = stdmod.standardize_frames(
+            frames, grid=(cw, ch), sampling=sampling, colors=colors,
+            palette=_pal, bg="keep")
+        rep["grid"] = (cw, ch)
+    else:
+        if size:
+            tw, th = size
+            outs = [downsample_average(f, tw, th) for f in frames]
+        else:
+            outs = [f.convert("RGBA") for f in frames]
+        # 背景透明化（量化的主体：不把背景色算进色板；连通清除保主体包住的高光）
+        # 背景色高度一致（原视频深灰/白底），容差取 24（RGB 分量差 24）；bbox 判定 60 是主体/背景分离阈值不要混用
+        if bg == "auto":
+            outs = [remove_bg_connected(f, bg_tol=24) for f in outs]
+        elif bg and bg != "keep":
+            from palette import hex_to_rgb
+            outs = [remove_bg_connected(f, bg_rgb=hex_to_rgb(bg), bg_tol=24) for f in outs]
+        srep = {"colors_out": [None] * len(outs)}
+        # 跨帧共享色板量化
+        if palette:
+            from palette import Palette
+            pal = Palette.load(palette)
+            outs = [stdmod.snap_to_palette(f.convert("RGBA"), pal) for f in outs]
+            srep = {"colors_out": [len(set((p[0], p[1], p[2]) for p in f.getdata() if p[3] > 0))
+                                   for f in outs],
+                    "quantize": "palette:{}".format(pal.name)}
+        elif colors and colors > 0:
+            # 有描边时：主体量化保留 colors-1 色，描边色占 1 配额（工程规范 ≤16 色含描边）
+            k = colors - (1 if outline else 0)
+            pooled = Counter()
+            for f in outs:
+                pooled.update((p[0], p[1], p[2]) for p in f.getdata() if p[3] > 0)
+            pal = stdmod.build_palette_k(list(pooled.items()), k)
+            outs = [stdmod.map_with_palette(f, pal) for f in outs]
+            srep = {"colors_out": [None] * len(outs),
+                    "quantize": "k={}（跨帧合并聚类）".format(k)}
+        # 描边
+        if outline:
+            sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "generation"))
+            from canvas import Canvas
+            oc = outline
+            if isinstance(oc, str):
+                from palette import hex_to_rgb
+                oc = hex_to_rgb(oc)
+            outs = [_outline(f, oc) for f in outs]
+            srep["outline"] = oc
+        # 最终色数（含描边后；不透明像素唯一色）
+        srep["colors_out"] = [len(set((p[0], p[1], p[2]) for p in f.getdata() if p[3] > 0))
+                              for f in outs]
+        rep["quantize"] = srep.get("quantize")
+        rep["colors_out"] = srep.get("colors_out")
+
+    # 输出
+    os.makedirs(out, exist_ok=True)
+    stem = os.path.splitext(os.path.basename(video))[0]
+    if keep_frames:
+        for i, f in enumerate(outs):
+            f.convert("RGBA").save(os.path.join(out, "{}_{:02d}.png".format(stem, i)))
+    if make_gif and outs:
+        anim.export_gif([f.convert("RGBA") for f in outs],
+                        os.path.join(out, stem + ".gif"),
+                        fps=rep["fps"] if rep["fps"] else 10)
+    if make_html and outs:
+        anim.export_html([f.convert("RGBA") for f in outs],
+                         os.path.join(out, stem + ".html"),
+                         title=stem, fps=rep["fps"] if rep["fps"] else 10)
+    rep["out"] = out
+    rep["frames_used"] = len(outs)
+    return rep
+
+
+def _outline(im, color):
+    """给 RGBA 图加 1px 内描边（复用 canvas.outline_in 语义）。"""
+    from canvas import Canvas
+    cv = Canvas.from_image(im.convert("RGBA"))
+    cv.outline_in(tuple(color) + (255,))
+    return cv.to_image()

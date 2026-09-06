@@ -53,6 +53,10 @@ python tools/pixelart/pixcli.py unsheet assets/sprites/<资产>/<名称>_idle_sh
 # 任意图归入工程调色板 + alpha 两态化（外部参考/模仿导入的结构性保色；多输入时 -o 为目录）
 python tools/pixelart/pixcli.py quantize src.png --palette assets/palettes/<调色板名>.json -o out.png
 
+# 像素视频标准化：AI 生成视频（mp4/webm/mov）→ 标准像素动画帧序列+GIF+HTML
+# 需要 ffmpeg；AI 动态视频无稳定网格 → 默认像素化降采样（非网格还原）
+python tools/pixelart/pixcli.py video-std ai_video.mp4 -o out_dir/ --size 64x64 --outline '#182b54' --colors 16
+
 # 像素级比对：一致 exit 0，差异报数量/bbox/坐标（重构或改参后"零像素差异"的验收方式）
 python tools/pixelart/pixcli.py diff assets/sprites/mob /tmp/regen_mob
 python tools/pixelart/pixcli.py diff a.png b.png
