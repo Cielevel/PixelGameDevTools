@@ -9,7 +9,7 @@
 |---|---|
 | `pixel-toolkit/` | pixcli 像素美术 CLI 与核心库（Python 3 + Pillow，唯一第三方依赖）。共用基础库：`palette`（调色板 JSON、量化归板、alpha 两态）/ `anim`（帧 IO、sprite sheet 拼切、GIF/自包含 HTML 播放器、洋葱皮检查图）/ `check`（程序化门禁：尺寸/alpha/色数/对齐/动画一致性/连通域）/ `layout`（sprites 子目录布局约定）；`generation/` 为**纯程序化生成素材方案**独立类别（`canvas` 逐像素绘制基元 / `style_kit` 明暗与造型风格基准库 / `gen_*.py` 生成脚本，骨架范例 `gen_slime_idle.py`）——后续「纯程序验证素材」功能将与此类别并列；`README.md` 为完整命令文档 |
 | `scene-previewer/` | 场景预览台（纯静态单 HTML，双击即用）：tilemap + sprite 摆位、分层帧动画（本体层+配件层同钟合成）播放、整数倍最近邻缩放、踩格线——素材「游戏内比例实感」的正式视检环境，避免放大看图的认知偏差；底部 SCENE 数据即接入点 |
-| `asset-inspector/` | 素材验收台（纯静态单 HTML，双击即用，离线，Win/macOS）：接收图片 / GIF / 视频素材——尺寸档位合规检查（档位表可自定义、tile 整除、整数倍缩放适配）、颜色提取罗列（不透明唯一 RGB + alpha 两态检查）、近似色合并（阈值可调）+ 最近邻缩格 + 保存 PNG（JPEG 参考图噪声清洗/候选稿恢复）、GIF/视频逐帧检视、像素级取色、导出工程调色板 JSON（与 pixel-toolkit 调色板格式一致） |
+| `asset-inspector/` | 素材处理与验收工具（纯静态单 HTML，双击即用，离线，Win/macOS）：接收图片 / GIF / 视频素材——尺寸档位合规检查（档位表可自定义、tile 整除、整数倍缩放适配）、颜色提取罗列与近似色合并（阈值可调）+ 最近邻缩格 + 保存 PNG、自动描黑边（附加/转换，非破坏层）+ 描边笔刷、GIF/视频逐帧检视、像素级取色、导出工程调色板 JSON（与 pixel-toolkit 调色板格式一致） |
 | `agent-pipeline/` | ZCode 多 agent 像素美术流水线（8 个 agent + shared 公共基线）：artist/reviewer 效率版与全量版、loop-reviewer（循环动画专项）、imitator+reviewer（有源参考的模仿绘制）、quick（形象设计快稿）；`shared/` 收拢共同约定（像素资产约定/技法纪律/审查框架），**agent 定义只含各自差量，改基准只改 AGENTS.md 一处**；外加 pixcli skill（工具速查与门禁判读） |
 | `asset-packs/` | 已购第三方模板资产包（只读参考，「借动作不借皮」的源库）：`top-down-asset-pack/`（俯视 64×64 格动作包，idle/walk/run/attack × 8 朝向）、`2d-pixel-art-character-template/`（48×48 侧视动作模板包）；规格与许可边界见包内 README |
 | `templates/` | `pixel-art-repro.yml`：GitHub Actions 资产可复现 workflow（重跑全部 gen 脚本 → 与在盘资产逐像素 diff → pixcli 结构门禁）；`gitattributes`：PNG/GIF 等一律 binary 防换行归一化误伤；`gitignore-pixel-game`：本类工程的 .gitignore 起步模板 |

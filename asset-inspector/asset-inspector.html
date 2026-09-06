@@ -2,7 +2,7 @@
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8">
-<title>素材验收台 · Asset Inspector</title>
+<title>素材处理与验收工具 · Asset Inspector</title>
 <style>
   body { background:#14151f; color:#a1a3c0; font:13px/1.6 system-ui,sans-serif; margin:0; display:flex; flex-direction:column; height:100vh; }
   h1 { font-size:15px; color:#dfd9c3; margin:0; font-weight:600; }
@@ -46,6 +46,7 @@
   .chips { display:flex; flex-wrap:wrap; gap:4px; margin-top:4px; }
   .chip { display:inline-flex; align-items:center; gap:4px; background:#1e1f2e; border:1px solid #4d4e6c; border-radius:10px; padding:0 8px; font-size:12px; cursor:pointer; }
   .note { color:#6d6f8f; font-size:12px; }
+  details { margin:4px 0; } summary { cursor:pointer; color:#dfd9c3; }
   .row { display:flex; gap:8px; align-items:center; margin:4px 0; flex-wrap:wrap; }
   footer { padding:6px 16px; border-top:1px solid #2c2d40; display:flex; gap:16px; }
   #drop { outline:2px dashed #4ed4e8; outline-offset:-6px; }
@@ -54,7 +55,7 @@
 </head>
 <body>
 <header>
-  <h1>素材验收台 · Asset Inspector</h1>
+  <h1>素材处理与验收工具</h1>
   <button id="open">打开素材…</button>
   <button id="clear">清空队列</button>
   <input type="file" id="picker" multiple hidden
@@ -68,6 +69,8 @@
       <button id="minus">−</button><span id="zoom">1×</span><button id="plus">＋</button>
       <button id="fit">适应窗口</button>
       <label><input type="checkbox" id="grid"> 像素网格</label>
+      <input type="number" id="gstep" min="1" step="1" value="8" title="网格密度（源像素间距，正整数）" style="width:48px">
+      <span class="note">密度</span>
       <span id="media" hidden>
         <button id="play">▶</button>
         <button id="prev">‹ 帧</button><span id="fno"></span><button id="next">帧 ›</button>
@@ -89,32 +92,42 @@
     <div class="row">tile 整除：<input type="number" id="tile" value="32" min="1" step="8"> px <span id="tileChk"></span></div>
     <div class="row note">整数倍缩放适配：<span id="fitchk"></span></div>
 
-    <h2>③ 颜色提取（当前帧）</h2>
-    <div id="colsum"></div>
-    <div id="coltbl"></div>
-
-    <h2>④ 合并近似色 → PNG</h2>
-    <div class="row">合并阈值 <input type="range" id="mthr" min="0" max="100" value="0" style="width:140px"> <span id="mthrv">0</span> <span class="note">（RGB 距离，0=不合并）</span></div>
-    <div class="row">缩格（最近邻采样）<select id="mscale">
+    <h2>③ 处理与导出（对当前帧生效）</h2>
+    <div class="row">合并阈值 <input type="range" id="mthr" min="0" max="100" value="0" style="width:130px"> <span id="mthrv">0</span> <span class="note">RGB 距离，0=不合并</span></div>
+    <div class="row">缩格 <select id="mscale">
       <option value="1" selected>不缩格</option>
       <option value="2">1/2</option><option value="4">1/4</option><option value="8">1/8</option>
       <option value="16">1/16</option><option value="32">1/32</option>
-    </select> <span class="note">像素风格大图先缩到逻辑网格</span></div>
+    </select> <span class="note">最近邻，像素风大图先缩到逻辑网格</span></div>
     <div class="row"><label><input type="checkbox" id="malpha" checked> alpha 两态化（≥128→255，对齐工程门禁）</label></div>
-    <div id="mersum" class="note">阈值 &gt; 0 或选择缩格后启用（对当前帧生效）：预览区与下方色表切换为处理结果；③ 仍为原始帧口径。「保存为 PNG」保存当前显示画面。</div>
-    <div id="mertbl" hidden></div>
+    <div class="row">自动描边 <select id="omode">
+      <option value="off" selected>关</option>
+      <option value="outer">附加（外侧加一圈）</option>
+      <option value="inner">转换（边缘转黑）</option>
+    </select> <span class="note">1px 黑（#000）</span></div>
+    <div class="row"><label><input type="checkbox" id="brush"> 描边笔刷</label>
+      <button class="mini" id="clearStrokes">清空笔迹</button></div>
+    <div class="note" id="brushhint" hidden>笔刷：左键拖动涂黑，Alt+拖动擦除，右键拖动平移。开关只切换显示，不抹掉笔迹（换素材/帧/缩格才作废）。无透明通道的素材（JPEG）自动描边只作用于画布边缘，角色描边请用笔刷。</div>
     <div class="row">
       <button class="mini" id="savePng">保存为 PNG</button>
       <button class="mini" id="expMerged" hidden>导出合并后调色板 JSON</button>
+      <button class="mini" id="copyHex">复制 HEX 清单</button>
     </div>
+    <div id="mersum" class="note">阈值 &gt; 0 或选择缩格后启用：预览区与 ④ 色表切换为处理结果。</div>
 
-    <h2>⑤ 拾色与导出</h2>
-    <div class="note">在预览区点击像素即拾取该色（透明像素不可拾）：</div>
+    <h2>④ 颜色表</h2>
+    <div id="mertbl"></div>
+    <details id="origdetails" open><summary id="origsummary">原始帧色表</summary>
+      <div id="colsum"></div>
+      <div id="coltbl"></div>
+    </details>
+
+    <h2>⑤ 拾色</h2>
+    <div class="note">预览区点击像素拾取该色（透明不可拾）；笔刷开启时点击=涂黑：</div>
     <div class="chips" id="picked"></div>
     <div class="row">
       <button class="mini" id="expPal">导出调色板 JSON（提取色，按占比）</button>
       <button class="mini" id="expPicked" hidden>导出拾色 JSON</button>
-      <button class="mini" id="copyHex">复制 HEX 清单</button>
     </div>
     <div class="note">导出格式与 pixel-toolkit 调色板一致（{"name","colors"}），可直接落 assets/palettes/ 供 pixcli quantize / check --palette 使用。</div>
   </aside>
@@ -234,6 +247,32 @@ function mergeImageData(id, threshold, alphaBin) {
   return { width: w, height: h, data: out };
 }
 
+/** 标准像素画描边（1px、#000000、4 连通）：
+ *  'inner' 转换 = 不透明（alpha≥128）像素邻接透明/画布外 → 该像素转黑；
+ *  'outer' 附加 = 透明像素邻接不透明 → 补黑（画布内裁剪，不扩画布）。
+ *  像素单位为当前（可能已缩格）图像的源像素，缩格变化时描边块大小随之变化。 */
+function applyOutline(id, mode) {
+  const w = id.width, h = id.height, src = id.data;
+  const out = new Uint8ClampedArray(src);
+  const opaque = (x, y) => x >= 0 && y >= 0 && x < w && y < h && src[(y * w + x) * 4 + 3] >= 128;
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const i = (y * w + x) * 4;
+      const op = src[i + 3] >= 128;
+      if (mode === 'inner') {
+        if (op && (!opaque(x - 1, y) || !opaque(x + 1, y) || !opaque(x, y - 1) || !opaque(x, y + 1))) {
+          out[i] = 0; out[i + 1] = 0; out[i + 2] = 0; out[i + 3] = 255;
+        }
+      } else if (mode === 'outer') {
+        if (!op && (opaque(x - 1, y) || opaque(x + 1, y) || opaque(x, y - 1) || opaque(x, y + 1))) {
+          out[i] = 0; out[i + 1] = 0; out[i + 2] = 0; out[i + 3] = 255;
+        }
+      }
+    }
+  }
+  return { width: w, height: h, data: out };
+}
+
 /* ═══════════ UI 层（仅浏览器） ═══════════ */
 function init() {
   const $ = id => document.getElementById(id);
@@ -251,6 +290,10 @@ function init() {
   let picked = [];             // hex 列表
   let lastAnalysis = null;     // 当前帧分析结果
   let proc = null;             // ④ 合并/缩格处理结果 {canvas,id,analysis,threshold,denom}；null = 未启用
+  let comp = null;             // 显示合成 {canvas,id} = proc/原始帧 + 自动描边（笔迹在绘制时叠加）
+  let omode = 'off';           // 自动描边：off | outer | inner
+  let brushOn = false;         // 描边笔刷显示开关
+  const strokes = new Map();   // 笔迹层 key = y*65536+x（换素材/帧/缩格才清空）
 
   // ── 设置项（localStorage 持久化）──
   const store = {
@@ -260,6 +303,8 @@ function init() {
     set tile(v) { localStorage.setItem('ai_tile', v); },
     get threshold() { const v = +localStorage.getItem('ai_threshold'); return v > 0 ? v : 16; },
     set threshold(v) { localStorage.setItem('ai_threshold', v); },
+    get gstep() { const v = +localStorage.getItem('ai_gstep'); return v >= 1 ? v : 8; },
+    set gstep(v) { localStorage.setItem('ai_gstep', v); },
   };
   let tiers = store.tiers;
 
@@ -309,6 +354,7 @@ function init() {
     strip.hidden = true; strip.textContent = ''; mediaBar.hidden = true;
     $('fno').textContent = ''; $('play').textContent = '▶';
     fitMode = true;
+    strokes.clear(); comp = null;
     try {
       if (it.kind === 'img') {
         it.img = await loadImg(it.url);
@@ -394,6 +440,7 @@ function init() {
 
   function showFrame(it, i) {
     it.cur = it.frames[i]; markStrip(it);
+    strokes.clear();   // 帧切换 = 坐标空间变了，笔迹作废
     $('fno').textContent = (i + 1) + '/' + it.total + (it.capped ? '+' : '');
     fit(); analyzeCurrent(it);
   }
@@ -445,7 +492,7 @@ function init() {
     renderCompliance(a);
     renderColors(a);
     if (procActive()) updateProc();
-    else { proc = null; renderMergePanel(null); }
+    else { proc = null; renderMergePanel(null); rebuildComp(); drawCurrent(it); }
   }
 
   function renderInfo(it, a) {
@@ -512,25 +559,34 @@ function init() {
   // ── 视图（缩放/平移/网格/取色）──
   function drawCurrent(it) {
     if (!it) it = files[cur];
-    const src = proc ? proc.canvas : (it && it.cur);
-    if (!src) return;
-    const w = proc ? proc.analysis.w : (src.videoWidth || src.naturalWidth || src.width);
-    const h = proc ? proc.analysis.h : (src.videoHeight || src.naturalHeight || src.height);
+    if (!comp) return;
+    const w = comp.id.width, h = comp.id.height;
     cv.width = Math.max(1, Math.round(w * zoom)); cv.height = Math.max(1, Math.round(h * zoom));
     ctx.imageSmoothingEnabled = false;
     ctx.clearRect(0, 0, cv.width, cv.height);
-    ctx.drawImage(src, ox, oy, cv.width, cv.height);
-    if ($('grid').checked && zoom >= 4 && Number.isInteger(zoom)) drawGrid(w, h);
+    ctx.drawImage(comp.canvas, ox, oy, cv.width, cv.height);
+    if (brushOn && strokes.size) {   // 笔迹层（非破坏：只叠加显示）
+      ctx.fillStyle = '#000';
+      for (const k of strokes.keys()) {
+        const x = k % 65536, y = (k - x) / 65536;
+        if (x < w && y < h) ctx.fillRect(ox + x * zoom, oy + y * zoom, zoom, zoom);
+      }
+    }
+    if ($('grid').checked && Number.isInteger(zoom) && zoom >= 2) drawGrid(w, h);
   }
 
   function drawGrid(w, h) {
-    ctx.strokeStyle = 'rgba(165,236,246,0.15)';
+    const N = Math.max(1, Math.round(+$('gstep').value || 8));
+    if (N >= 2 && zoom >= 6) {   // 细分线（高倍时辅助）
+      ctx.strokeStyle = 'rgba(165,236,246,0.12)';
+      ctx.lineWidth = 1;
+      for (let x = 1; x < w; x++) { line(x * zoom + ox + .5, 0, x * zoom + ox + .5, cv.height); }
+      for (let y = 1; y < h; y++) { line(0, y * zoom + oy + .5, cv.width, y * zoom + oy + .5); }
+    }
+    ctx.strokeStyle = 'rgba(165,236,246,0.45)';   // 主网格：直接叠加在图像上，密度可调
     ctx.lineWidth = 1;
-    for (let x = 1; x < w; x++) { line(x * zoom + ox + .5, 0, x * zoom + ox + .5, cv.height); }
-    for (let y = 1; y < h; y++) { line(0, y * zoom + oy + .5, cv.width, y * zoom + oy + .5); }
-    ctx.strokeStyle = 'rgba(165,236,246,0.35)';
-    for (let x = 8; x < w; x += 8) { line(x * zoom + ox + .5, 0, x * zoom + ox + .5, cv.height); }
-    for (let y = 8; y < h; y += 8) { line(0, y * zoom + oy + .5, cv.width, y * zoom + oy + .5); }
+    for (let x = N; x < w; x += N) { line(x * zoom + ox + .5, 0, x * zoom + ox + .5, cv.height); }
+    for (let y = N; y < h; y += N) { line(0, y * zoom + oy + .5, cv.width, y * zoom + oy + .5); }
     if (hover) {   // 悬停像素高亮
       ctx.strokeStyle = '#f8894b';
       ctx.strokeRect(hover.x * zoom + ox + .5, hover.y * zoom + oy + .5, zoom - 1, zoom - 1);
@@ -560,20 +616,33 @@ function init() {
     }
   }
 
-  // 悬停读数 + 取色
-  let hover = null, dragging = false, lastXY = null;
+  // 悬停读数 + 取色 + 笔刷
+  let hover = null, dragging = false, lastXY = null, painting = false, erasing = false, panning = false;
   function srcPixel(ev) {
     const r = cv.getBoundingClientRect();
     const x = Math.floor((ev.clientX - r.left - ox) / zoom);
     const y = Math.floor((ev.clientY - r.top - oy) / zoom);
-    const it = files[cur]; if (!it || !it.cur) return null;
-    const w = it.cur.videoWidth || it.cur.naturalWidth || it.cur.width;
-    const h = it.cur.videoHeight || it.cur.naturalHeight || it.cur.height;
-    return (x >= 0 && y >= 0 && x < w && y < h) ? { x, y } : null;
+    const dm = displayDims(); if (!dm) return null;
+    return (x >= 0 && y >= 0 && x < dm.w && y < dm.h) ? { x, y } : null;
   }
+  function paintAt(ev) {
+    const p = srcPixel(ev); if (!p) return;
+    const k = p.y * 65536 + p.x;
+    if (erasing) strokes.delete(k); else strokes.set(k, 1);
+    drawCurrent(files[cur]);
+    readout.textContent = 'x=' + p.x + ' y=' + p.y + (erasing ? '　已擦除' : '　已描黑');
+  }
+  cv.addEventListener('mousedown', ev => {
+    if (!comp) return;
+    if (brushOn && ev.button === 0) { painting = true; erasing = ev.altKey; paintAt(ev); }
+    else if (ev.button === 2) { panning = true; lastXY = { x: ev.clientX, y: ev.clientY }; }
+    else if (ev.button === 0) { dragging = true; lastXY = { x: ev.clientX, y: ev.clientY }; }
+    ev.preventDefault();
+  });
   cv.addEventListener('mousemove', ev => {
     const it = files[cur]; if (!it) return;
-    if (dragging && lastXY) {
+    if (painting) { paintAt(ev); return; }
+    if ((panning || dragging) && lastXY) {
       ox += ev.clientX - lastXY.x; oy += ev.clientY - lastXY.y;
       lastXY = { x: ev.clientX, y: ev.clientY };
       drawCurrent(it); return;
@@ -583,14 +652,16 @@ function init() {
     const dd = displayData(), dm = displayDims();
     if (p && lastAnalysis && dd) {
       const i = (p.y * dm.w + p.x) * 4;
-      readout.textContent = 'x=' + p.x + ' y=' + p.y + '　' + hex6((dd[i] << 16) | (dd[i + 1] << 8) | dd[i + 2]) + '　a=' + dd[i + 3];
+      const black = brushOn && strokes.has(p.y * 65536 + p.x);
+      readout.textContent = 'x=' + p.x + ' y=' + p.y + '　' + (black ? '#000000（笔迹）' : hex6((dd[i] << 16) | (dd[i + 1] << 8) | dd[i + 2]) + '　a=' + dd[i + 3]);
     } else readout.textContent = '';
     drawCurrent(it);
   });
   cv.addEventListener('mouseleave', () => { hover = null; readout.textContent = ''; drawCurrent(files[cur]); });
-  cv.addEventListener('mousedown', ev => { dragging = true; lastXY = { x: ev.clientX, y: ev.clientY }; });
-  addEventListener('mouseup', () => { dragging = false; lastXY = null; });
+  addEventListener('mouseup', () => { dragging = false; lastXY = null; painting = false; erasing = false; panning = false; });
+  cv.addEventListener('contextmenu', ev => ev.preventDefault());
   cv.addEventListener('click', ev => {
+    if (brushOn) return;   // 笔刷模式下点击 = 涂黑，不拾色
     const p = srcPixel(ev); if (!p || !lastAnalysis) return;
     const dd = displayData(), dm = displayDims();
     if (!dd) return;
@@ -637,15 +708,23 @@ function init() {
     catch (e) { setStatus('复制失败：' + e.message, true); }
   };
 
-  // 当前显示画面的像素数据（④ 启用时为处理结果，否则为原始帧缓存）
+  // 当前显示画面的像素数据（合成层 = proc/原始帧 + 自动描边；笔迹仅在绘制时叠加）
   const displayDims = () => proc ? proc.analysis : lastAnalysis;
   function displayData() {
+    return comp ? comp.id.data : null;
+  }
+  function rebuildComp() {
     const it = files[cur];
-    if (!it) return null;
-    return proc ? proc.id.data : (it.curId && it.curId.data);
+    if (!it || !it.cur) { comp = null; return; }
+    const baseId = proc ? proc.id : (it.curId || frameToImageData(it.cur));
+    const id = omode !== 'off' ? applyOutline(baseId, omode) : baseId;
+    const canvas = document.createElement('canvas');
+    canvas.width = id.width; canvas.height = id.height;
+    canvas.getContext('2d').putImageData(new ImageData(id.data, id.width, id.height), 0, 0);
+    comp = { canvas, id };
   }
 
-  // ── ④ 合并近似色 → PNG ──
+  // ── ③ 处理与导出：合并 / 缩格 / 描边 / 笔刷 ──
   function procActive() { return +$('mthr').value > 0 || +$('mscale').value > 1; }
   let procPending = false;
   function scheduleProc() {   // 滑杆拖动的 rAF 节流
@@ -658,7 +737,7 @@ function init() {
     if (!it || !it.cur || !procActive()) {
       const had = !!proc;
       proc = null; renderMergePanel(null);
-      if (had) drawCurrent(it);
+      if (had) { rebuildComp(); drawCurrent(it); }
       return;
     }
     const thr = +$('mthr').value, denom = +$('mscale').value, abin = $('malpha').checked;
@@ -682,6 +761,8 @@ function init() {
     canvas.getContext('2d').putImageData(new ImageData(merged.data, merged.width, merged.height), 0, 0);
     const prev = proc;
     proc = { canvas, id: merged, analysis: analyzeImageData(merged), threshold: thr, denom };
+    if (prev && prev.denom !== denom) strokes.clear();   // 坐标空间变了，笔迹作废
+    rebuildComp();
     renderMergePanel(proc.analysis);
     if (!prev || prev.analysis.w !== proc.analysis.w || prev.analysis.h !== proc.analysis.h) fit();
     else drawCurrent(it);
@@ -689,13 +770,15 @@ function init() {
   function renderMergePanel(a) {
     const sum = $('mersum'), tblEl = $('mertbl');
     if (!a) {
-      sum.textContent = '阈值 > 0 或选择缩格后启用（对当前帧生效）：预览区与下方色表切换为处理结果；③ 仍为原始帧口径。「保存为 PNG」保存当前显示画面。';
+      sum.textContent = '阈值 > 0 或选择缩格后启用：预览区与 ④ 色表切换为处理结果（当前显示原始帧）。';
       tblEl.hidden = true; tblEl.textContent = '';
       $('expMerged').hidden = true;
+      $('origdetails').open = true;
+      $('origsummary').textContent = '原始帧色表';
       return;
     }
     const orig = lastAnalysis ? lastAnalysis.colors.length : '—';
-    sum.innerHTML = '<p class="kv">合并后色数：<b>' + a.colors.length + '</b>（原 ' + orig + '）　尺寸：' + a.w + '×' + a.h + (proc.denom > 1 ? '（1/' + proc.denom + ' 缩格）' : '') + '</p>';
+    sum.innerHTML = '<p class="kv">合并后色数：<b>' + a.colors.length + '</b>（原 ' + orig + '）　尺寸：' + a.w + '×' + a.h + (proc.denom > 1 ? '（1/' + proc.denom + ' 缩格）' : '') + (omode !== 'off' ? '　含自动描边' : '') + (brushOn && strokes.size ? '　含笔迹 ' + strokes.size + ' px' : '') + '</p>';
     tblEl.hidden = false; tblEl.textContent = '';
     tblEl.appendChild(colorTable(a, DISPLAY_CAP));
     if (a.colors.length > DISPLAY_CAP) {
@@ -704,6 +787,8 @@ function init() {
       tblEl.appendChild(p);
     }
     $('expMerged').hidden = false;
+    $('origdetails').open = false;
+    $('origsummary').textContent = '原始帧色表（' + orig + ' 色，点开查看）';
   }
   function colorTable(a, cap) {
     const tbl = document.createElement('table');
@@ -723,22 +808,27 @@ function init() {
     let base = stem();
     if (it && it.kind === 'gif' && it.curIdx >= 0) base += '_f' + String(it.curIdx).padStart(2, '0');
     if (proc) base += '_q' + proc.threshold + (proc.denom > 1 ? '_d' + proc.denom : '');
+    if (omode !== 'off') base += '_ol';
+    if (brushOn && strokes.size) base += '_br';
     return base + '.png';
   }
   $('savePng').onclick = () => {
-    const it = files[cur]; if (!it || !it.cur) { setStatus('先加载素材', true); return; }
-    let canvas;
-    if (proc) canvas = proc.canvas;
-    else {
-      const id = it.curId || frameToImageData(it.cur);
-      canvas = document.createElement('canvas');
-      canvas.width = id.width; canvas.height = id.height;
-      canvas.getContext('2d').putImageData(new ImageData(id.data, id.width, id.height), 0, 0);
+    const it = files[cur]; if (!it || !it.cur || !comp) { setStatus('先加载素材', true); return; }
+    const canvas = document.createElement('canvas');
+    canvas.width = comp.id.width; canvas.height = comp.id.height;
+    canvas.getContext('2d').putImageData(new ImageData(comp.id.data, comp.id.width, comp.id.height), 0, 0);
+    if (brushOn && strokes.size) {   // 笔迹烘进导出件（按当前显示画面）
+      const c2 = canvas.getContext('2d');
+      c2.fillStyle = '#000';
+      for (const k of strokes.keys()) {
+        const x = k % 65536, y = (k - x) / 65536;
+        if (x < canvas.width && y < canvas.height) c2.fillRect(x, y, 1, 1);
+      }
     }
     canvas.toBlob(b => {
       if (!b) { setStatus('PNG 导出失败', true); return; }
       download(pngName(), b, 'image/png');
-      setStatus('已保存 ' + pngName() + '（' + canvas.width + '×' + canvas.height + '，无损 PNG' + (proc ? '，合并后 ' + proc.analysis.colors.length + ' 色' : '') + '）');
+      setStatus('已保存 ' + pngName() + '（' + canvas.width + '×' + canvas.height + '，无损 PNG' + (proc ? '，合并后 ' + proc.analysis.colors.length + ' 色' : '') + (omode !== 'off' ? '，含自动描边' : '') + (brushOn && strokes.size ? '，含笔迹' : '') + '）');
     }, 'image/png');
   };
   $('expMerged').onclick = () => {
@@ -749,6 +839,11 @@ function init() {
   $('mthr').oninput = e => { $('mthrv').textContent = e.target.value; scheduleProc(); };
   $('mscale').onchange = updateProc;
   $('malpha').onchange = updateProc;
+  $('omode').onchange = e => { omode = e.target.value; rebuildComp(); drawCurrent(files[cur]); };
+  $('brush').onchange = e => { brushOn = e.target.checked; $('brushhint').hidden = !brushOn; drawCurrent(files[cur]); };
+  $('clearStrokes').onclick = () => { strokes.clear(); drawCurrent(files[cur]); };
+  $('gstep').onchange = e => { store.gstep = Math.max(1, Math.round(+e.target.value) || 8); e.target.value = store.gstep; drawCurrent(files[cur]); };
+  $('gstep').value = store.gstep;
 
   // ── 工具条事件 ──
   $('plus').onclick = () => setZoom(zoom + 1);
@@ -757,7 +852,7 @@ function init() {
   $('grid').onchange = () => drawCurrent(files[cur]);
   $('open').onclick = () => $('picker').click();
   $('picker').onchange = e => { addFiles(e.target.files); e.target.value = ''; };
-  $('clear').onclick = () => { files.forEach(f => URL.revokeObjectURL(f.url)); files.length = 0; cur = -1; lastAnalysis = null; renderQueue(); $('info').className = 'note'; $('info').textContent = '未加载素材'; setStatus('拖入或打开素材（PNG / JPEG / WebP / BMP / GIF / MP4 / WebM / MOV），可多选'); };
+  $('clear').onclick = () => { files.forEach(f => URL.revokeObjectURL(f.url)); files.length = 0; cur = -1; lastAnalysis = null; proc = null; comp = null; strokes.clear(); renderQueue(); ctx.clearRect(0, 0, cv.width, cv.height); $('info').className = 'note'; $('info').textContent = '未加载素材'; setStatus('拖入或打开素材（PNG / JPEG / WebP / BMP / GIF / MP4 / WebM / MOV），可多选'); };
   $('tile').onchange = e => { store.tile = +e.target.value || 32; if (lastAnalysis) renderCompliance(lastAnalysis); };
   $('addTier').onclick = () => {
     const w = $('cw').value, h = $('ch').value;
@@ -797,7 +892,7 @@ function init() {
 const escapeHtml = s => String(s).replace(/[&<>"]/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[ch]));
 
 if (typeof document !== 'undefined' && document.getElementById('cv')) init();
-if (typeof module !== 'undefined' && module.exports) module.exports = { analyzeImageData, checkTiers, checkTile, checkScaleFit, verdict, hex6, mergeImageData };
+if (typeof module !== 'undefined' && module.exports) module.exports = { analyzeImageData, checkTiers, checkTile, checkScaleFit, verdict, hex6, mergeImageData, applyOutline };
 </script>
 </body>
 </html>
