@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>深潮幸存者 · 场景预览台</title>
+<style>
+  body { background:#14151f; color:#a1a3c0; font:13px/1.6 system-ui,sans-serif; margin:0; padding:16px; }
+  h1 { font-size:15px; color:#dfd9c3; margin:0 0 8px; font-weight:600; }
+  #bar { margin:0 0 10px; display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
+  button { background:#303148; color:#dfd9c3; border:1px solid #4d4e6c; border-radius:4px; padding:3px 12px; cursor:pointer; }
+  button:hover { background:#3e3f59; }
+  #zoom { min-width:40px; text-align:center; color:#4ed4e8; display:inline-block; }
+  #stage { display:inline-block; border:1px solid #4d4e6c; line-height:0; }
+  canvas { display:block; image-rendering:pixelated; }
+  .hint { color:#6d6f8f; margin:10px 0 0; max-width:900px; }
+  #status.err { color:#f8894b; }
+</style>
+</head>
+<body>
+<h1>深潮幸存者 · 场景预览台</h1>
+<div id="bar">
+  <button id="minus">−</button><span id="zoom">1×</span><button id="plus">＋</button>
+  <button id="fit">适应窗口</button>
+  <label><input type="checkbox" id="grid"> 踩格线</label>
+  <span id="status">加载中…</span>
+</div>
+<div id="stage"><canvas id="cv" width="640" height="352"></canvas></div>
+<p class="hint">用途：素材在游戏内比例/观感的正式视检环境（避免"放大看"认知偏差）。支持静态贴图与分层帧动画（本体帧+花层帧同钟逐帧合成）；新增素材只改本文件底部 SCENE 数据；缩放只取整数倍（最近邻，禁平滑）。</p>
+<script>
+'use strict';
+// ════ 场景数据（唯一需要编辑的地方）════════════════════════════
+// 约定：canvas 逻辑分辨率 = 游戏参考分辨率口径（640×360 暂定，本场景 20×11 格整除取 640×352）；
+//       tilesets 字符 → 32×32 单帧 sheet；map 每字符一格；
+//       sprite 的 x = 水平中心、y = 脚底所踏地面线（图片底边对齐该线）；
+//       动画精灵 frames = 帧序列，每帧为"层列表"（自下而上 alpha 叠加，如 [本体帧, 花层帧]），
+//       单一时钟按 fps 推进帧号——分层动画的分层数据在此合成播放。
+const P  = '../../assets/sprites/player/';
+const N  = '../../assets/sprites/npc/';
+const seq = (prefix, n) => [...Array(n)].map((_, i) => P + prefix + '_' + String(i).padStart(2, '0') + '.png');
+const zip = (a, b) => a.map((s, i) => [s, b[i]]);
+
+const IDLE = seq('player_ch_idle_s', 10), WALK = seq('player_ch_walk_s', 6);
+
+const SCENE = {
+  canvas: { w: 640, h: 352 },
+  tilesets: {
+    '.': '../../assets/tiles/tile_floor_0_sheet.png',
+    'T': '../../assets/tiles/tile_wall_top_sheet.png',
+    'F': '../../assets/tiles/tile_wall_face_sheet.png',
+  },
+  map: [
+    'TTTTTTTTTTTTTTTTTTTT',
+    'FFFFFFFFFFFFFFFFFFFF',
+    '....................',
+    '....................',
+    '....................',
+    '....................',
+    '....................',
+    '....................',
+    '....................',
+    '....................',
+    '....................',
+  ],
+  sprites: [
+    // ── 静态 NPC（比例参照）──
+    { name: 'npc_masked_youth_idle_s_00', src: N + 'npc_masked_youth_idle_s_00.png', x: 150, y: 246 },
+    // ── player_ch 分层角色：本体帧 + 花层帧 同钟合成 ──
+    { name: 'player_ch+origin (idle 8fps)',       frames: zip(IDLE, seq('player_ch_acc_origin_idle_s', 10)),       fps: 8,  x: 214, y: 258 },
+    { name: 'player_ch+green_bubble (idle 8fps)', frames: zip(IDLE, seq('player_ch_acc_green_bubble_idle_s', 10)), fps: 8,  x: 276, y: 258 },
+    { name: 'player_ch+ice (walk 10fps)',         frames: zip(WALK, seq('player_ch_acc_ice_walk_s', 6)),           fps: 10, x: 338, y: 262 },
+    { name: 'player_ch+sun (walk 10fps)',         frames: zip(WALK, seq('player_ch_acc_sun_walk_s', 6)),           fps: 10, x: 400, y: 262 },
+  ],
+};
+
+// ════ 渲染器（一般不用改）════════════════════════════════════
+const cv = document.getElementById('cv'), ctx = cv.getContext('2d');
+ctx.imageSmoothingEnabled = false;
+const statusEl = document.getElementById('status'), zoomEl = document.getElementById('zoom');
+const gridEl = document.getElementById('grid');
+let zoom = 1;
+let autoFit = true;   // 仅"适应窗口"模式下随窗口变化重算；手动缩放后不回弹
+
+function load(src) {
+  return new Promise((res, rej) => {
+    const im = new Image();
+    im.onload = () => res(im);
+    im.onerror = () => rej(new Error(src));
+    im.src = src;
+  });
+}
+
+function spriteSrcs(sp) {
+  return sp.frames ? sp.frames.flat() : [sp.src];
+}
+
+async function boot() {
+  const jobs = [
+    ...Object.entries(SCENE.tilesets).map(([ch, src]) => load(src).then(im => [ch, im])),
+    ...SCENE.sprites.flatMap(sp => spriteSrcs(sp).map(src => load(src).then(im => [src, im]))),
+  ];
+  const out = new Map();
+  let fail = 0;
+  for (const j of jobs) {
+    try { const [k, im] = await j; out.set(k, im); }
+    catch (e) { fail++; statusEl.textContent = '加载失败: ' + e.message; statusEl.className = 'err'; }
+  }
+  if (!fail) {
+    statusEl.textContent = `就绪：${SCENE.map[0].length}×${SCENE.map.length} 格 + ${SCENE.sprites.length} 个精灵（含帧动画）`;
+    statusEl.className = '';
+  }
+  return out;
+}
+
+let current = new Map();
+function draw(imgs, t) {
+  const { w, h } = SCENE.canvas;
+  ctx.clearRect(0, 0, w, h);
+  const T = 32;
+  SCENE.map.forEach((row, ry) => {
+    [...row].forEach((ch, rx) => {
+      const im = imgs.get(ch);
+      if (im) ctx.drawImage(im, rx * T, ry * T, T, T);
+    });
+  });
+  for (const sp of SCENE.sprites) {
+    const place = im => ctx.drawImage(im, Math.round(sp.x - im.width / 2), Math.round(sp.y - im.height));
+    if (sp.frames) {
+      const idx = Math.floor(t * (sp.fps || 8)) % sp.frames.length;
+      for (const src of sp.frames[idx]) {
+        const im = imgs.get(src);
+        if (im) place(im);
+      }
+    } else {
+      const im = imgs.get(sp.src);
+      if (im) place(im);
+    }
+  }
+  if (gridEl.checked) {
+    ctx.strokeStyle = 'rgba(165,236,246,0.18)';
+    ctx.lineWidth = 1;
+    for (let x = T; x < w; x += T) { ctx.beginPath(); ctx.moveTo(x + .5, 0); ctx.lineTo(x + .5, h); ctx.stroke(); }
+    for (let y = T; y < h; y += T) { ctx.beginPath(); ctx.moveTo(0, y + .5); ctx.lineTo(w, y + .5); ctx.stroke(); }
+  }
+}
+
+function setZoom(z, manual = true) {
+  zoom = Math.max(1, Math.min(8, Math.round(z)));
+  if (manual) autoFit = false;
+  cv.style.width = SCENE.canvas.w * zoom + 'px';
+  cv.style.height = SCENE.canvas.h * zoom + 'px';
+  zoomEl.textContent = zoom + '×';
+}
+function fit() {
+  // clientWidth/Height 已排除既有滚动条；再留少量余量，避免 fit 结果恰好溢出引发滚动条抖动
+  const z = Math.floor(Math.min(
+    (document.documentElement.clientWidth - 40) / SCENE.canvas.w,
+    (document.documentElement.clientHeight - 170) / SCENE.canvas.h));
+  autoFit = true;
+  setZoom(Math.max(1, z), false);
+}
+
+document.getElementById('plus').onclick = () => setZoom(zoom + 1);
+document.getElementById('minus').onclick = () => setZoom(zoom - 1);
+document.getElementById('fit').onclick = fit;
+addEventListener('keydown', e => {
+  if (e.key === '=' || e.key === '+') setZoom(zoom + 1);
+  if (e.key === '-') setZoom(zoom - 1);
+});
+addEventListener('wheel', e => {
+  if (!e.ctrlKey) return;
+  e.preventDefault();
+  setZoom(zoom + (e.deltaY < 0 ? 1 : -1));
+}, { passive: false });
+addEventListener('resize', () => { if (autoFit) fit(); });
+
+let t0 = 0;
+function loop(now) {
+  draw(current, (now - t0) / 1000);
+  requestAnimationFrame(loop);
+}
+
+boot().then(m => {
+  current = m;
+  fit();
+  t0 = performance.now();
+  requestAnimationFrame(loop);
+});
+</script>
+</body>
+</html>

@@ -1,0 +1,16 @@
+# macOS
+.DS_Store
+
+# 依赖与构建产物
+node_modules/
+dist/
+
+# Python 运行产物
+__pycache__/
+*.pyc
+
+# 极速模式 scratch 产物（pixel-quick，用后即清）
+previews/quick/
+
+# 本地参考图临时区（仅本地查看，不入库）
+/reference/
