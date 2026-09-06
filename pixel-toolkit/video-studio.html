@@ -170,24 +170,29 @@ function alphaStats(id) {
   return { count: total, bbox: total ? [x0,y0,x1,y1] : null };
 }
 
-/* 等比降采样（含 alpha 两态化：格内不透明占比 ≥1/2 → 不透明取均值，否则透明） */
-function downsampleContain(id, tw, th) {
+/* 等比降采样（含 alpha 两态化：格内不透明占比 ≥1/2 → 不透明取均值，否则透明）
+   fit=true: contain（等比缩放居中留边，不变形）；fit=false: stretch（直接拉伸到目标） */
+function downsampleContain(id, tw, th, fit = true) {
   const src = id, sx = src.width, sy = src.height;
-  let offX=0, offY=0;
-  if (sx/sy > tw/th) { offX = Math.floor((tw - th*sx/sy)/2); }
-  // 直接用比例计算缩放区域
-  const scale = Math.min(tw/sx, th/sy);
-  const nw = Math.max(1, Math.round(sx*scale)), nh = Math.max(1, Math.round(sy*scale));
   const out = new Uint8ClampedArray(tw*th*4);
   const d = src.data;
+  // 目标画布 tw×th 内 contain 源：等效"源窗口"（像素单位）在画布中的位置与大小
+  let wx = 0, wy = 0, ww = tw, wh = th;            // 窗口（输出格为单位）
+  if (fit && sx/sy !== tw/th) {
+    const k = Math.min(tw/sx, th/sy);              // 输出格 / 源像素 比例
+    ww = sx * k; wh = sy * k;
+    wx = (tw - ww) / 2; wy = (th - wh) / 2;
+  }
   for (let ty=0; ty<th; ty++) for (let tx=0; tx<tw; tx++) {
-    // 该输出格映射到源区域
-    const sxx = Math.floor((tx - (tw-nw)/2) / (nw/sx));  // 未用 — 简化: 均匀映射
-    const tX = tx - Math.floor((tw-nw)/2), tY = ty - Math.floor((th-nh)/2);
     const o = (ty*tw+tx)*4;
-    if (tX<0 || tY<0 || tX>=nw || tY>=nh) { out[o+3]=0; continue; }
-    const x0 = Math.floor(tX*sx/nw), x1 = Math.max(x0+1, Math.floor((tX+1)*sx/nw));
-    const y0 = Math.floor(tY*sy/nh), y1 = Math.max(y0+1, Math.floor((tY+1)*sy/nh));
+    // 目标格中心在窗口中的位置（输出格单位）→ 归一化 → 源像素坐标
+    const u = (tx + 0.5 - wx) / ww, v = (ty + 0.5 - wy) / wh;
+    if (u < 0 || u >= 1 || v < 0 || v >= 1) { out[o+3]=0; continue; }
+    const x0 = Math.max(0, Math.min(sx-1, Math.floor(u * sx)));
+    const dx = Math.max(1/sx, 1/ww);               // 一格源像素对应窗口宽度（源像素单位）
+    const x1 = Math.max(x0+1, Math.min(sx, Math.floor((u + Math.max(dx, 1/sx)) * sx)));
+    const y0 = Math.max(0, Math.min(sy-1, Math.floor(v * sy)));
+    const y1 = Math.max(y0+1, Math.min(sy, Math.floor((v + Math.max(1/sy, 1/wh)) * sy)));
     let n=0, r=0,g=0,b=0;
     for (let yy=y0; yy<y1; yy++) for (let xx=x0; xx<x1; xx++) {
       const i=(yy*sx+xx)*4;
@@ -313,10 +318,16 @@ async function extractFrames() {
   const fps = Math.max(1, +$('fps').value || 24);
   const n = Math.max(1, Math.round((t1 - t0) * fps));
   const frames = []; setStatus(`抽帧中：${n} 帧（${fmtT(t0)}~${fmtT(t1)} @ ${fps}fps）…`);
-  const waitSeek = t => new Promise(res => { v.onseeked = () => res(); v.currentTime = t; setTimeout(res, 800); });
+  const waitSeek = t => new Promise(res => {
+    let done = false;
+    const finish = () => { if (!done) { done = true; v.removeEventListener('seeked', finish); res(); } };
+    v.addEventListener('seeked', finish);
+    v.currentTime = Math.max(0, Math.min(t, V.dur - 0.001));
+    setTimeout(finish, 1200);   // 兜底（seek 相同时间不触发 seeked 时）
+  });
   for (let i=0; i<n; i++) {
     const t = t0 + (i+0.5) * (t1-t0)/n;
-    await waitSeek(Math.min(t, V.dur - 0.001));
+    await waitSeek(t);
     frames.push(frameToImageData(v));
     if (i % 8 === 0) { $('status').textContent = `抽帧 ${i+1}/${n}…`; await new Promise(r=>requestAnimationFrame(r)); }
   }
@@ -346,13 +357,14 @@ function processFrame(id) {
 function processAll(frames) {
   setStatus('标准化处理中…');
   const k = +$('colors').value || 0;
+  const fit = $('fit').checked;
   const raw = [];
   for (const f of frames) { const im = { width:f.width, height:f.height, data:new Uint8ClampedArray(f.data) };
     let img = im;
     const key = $('key').value;
     if (key === 'green' || (key === 'auto' && detectGreen(img))) img = chromaKey(img);
     const ow=Math.max(1,+$('ow').value||64), oh=Math.max(1,+$('oh').value||64);
-    img = downsampleContain(img, ow, oh);
+    img = downsampleContain(img, ow, oh, fit);
     raw.push(img);
   }
   const outline = $('outline').checked, ocol = $('outlineColor').value;
@@ -382,12 +394,13 @@ function hexToRgb(h) { return [parseInt(h.slice(1,3),16), parseInt(h.slice(3,5),
 /* --- 预览：canvas 播放已处理帧 --- */
 function renderFrame(f, scale) {
   const stage = $('vstage'); let cv = stage.querySelector('canvas');
-  if (!cv) { cv = document.createElement('canvas'); stage.replaceChild(cv, $('prev')); stage.insertBefore(cv, stage.firstChild); }
-  cv.width = f.width; cv.height = f.height;
+  if (!cv) { cv = document.createElement('canvas'); stage.replaceChild(cv, $('prev')); }
+  const s = Math.max(1, Math.round(scale) || 1);
+  cv.width = f.width * s; cv.height = f.height * s;   // 画布位图尺寸跟随缩放（修复：原来固定 64x64 导致放大被裁剪）
   const c = cv.getContext('2d'); c.imageSmoothingEnabled = false;
   c.clearRect(0,0,cv.width,cv.height);
-  c.drawImage(imageDataToCanvas(f), 0, 0, f.width*scale, f.height*scale);
-  cv.style.width = (f.width*scale)+'px'; cv.style.height=(f.height*scale)+'px';
+  c.drawImage(imageDataToCanvas(f), 0, 0, cv.width, cv.height);
+  cv.style.width = cv.width + 'px'; cv.style.height = cv.height + 'px';
 }
 function imageDataToCanvas(id) {
   const c = document.createElement('canvas'); c.width=id.width; c.height=id.height;
@@ -631,20 +644,33 @@ function init() {
   $('t0').onchange = drawTimeline; $('t1').onchange = drawTimeline;
   document.querySelectorAll('[data-fps]').forEach(b => b.onclick = () => { $('fps').value = b.dataset.fps; });
 
-  $('pbtn').onclick = async () => {
-    if (!V.video) { setStatus('请先加载视频', true); return; }
-    const frames = await extractFrames();
-    if (!frames.length) { setStatus('未抽到帧（检查区间/时长）', true); return; }
-    V.processed = processAll(frames);
-    V.raw = frames;
+  let busy = false;
+  async function runPipeline() {
+    if (busy) return; busy = true; $('pbtn').disabled = true;
+    try {
+      const frames = await extractFrames();
+      if (!frames.length) { setStatus('未抽到帧（检查区间/时长）', true); return; }
+      V.raw = frames;
+      finishProcess(processAll(frames));
+    } finally { busy = false; $('pbtn').disabled = false; }
+  }
+  function reprocess() {   // 参数变化：只用缓存的原始帧重跑处理管线（不重新抽帧）
+    if (!V.raw || !V.raw.length) return;
+    finishProcess(processAll(V.raw));
+  }
+  function finishProcess(processed) {
+    V.processed = processed;
     V.fidx = 0;
-    $('frameIdx').max = V.processed.length-1;
-    $('frameNo').textContent = `1/${V.processed.length}`;
-    renderFrame(V.processed[0], +$('zoomN').value || 4);
+    $('frameIdx').max = Math.max(0, V.processed.length-1);
+    $('frameNo').textContent = V.processed.length ? `1/${V.processed.length}` : '0/0';
+    if (V.processed.length) renderFrame(V.processed[0], +$('zoomN').value || 4);
     updateStats();
     buildExports();
+    $('playbtn').disabled = !V.processed.length;
     setStatus(`完成：${V.processed.length} 帧（${V.processed[0].width}×${V.processed[0].height}）`);
-  };
+  }
+
+  $('pbtn').onclick = runPipeline;
 
   $('playbtn').onclick = () => {
     if (!V.processed.length) return;
@@ -659,10 +685,22 @@ function init() {
   $('zoom').oninput = e => { $('zoomN').value=e.target.value; if (V.processed.length) renderFrame(V.processed[V.fidx], +e.target.value); };
   $('zoomN').oninput = e => { $('zoom').value=e.target.value; if (V.processed.length) renderFrame(V.processed[V.fidx], +e.target.value); };
 
-  // 参数修改 → 自动重处理（若已处理过）
+  // 参数修改 → 即时（oninput）+ 防抖自动重处理：
+  // 区间/帧率变化需重抽帧；处理参数变化只用缓存帧重跑管线（更快）
+  const STAM = new Set(['t0','t1','fps']);   // 需要重新抽帧的参数
+  let debounceT = null;
+  function onParamChange(id) {
+    clearTimeout(debounceT);
+    debounceT = setTimeout(() => {
+      if (STAM.has(id)) { if (V.video) runPipeline(); }
+      else reprocess();
+    }, 350);
+  }
   ['t0','t1','fps','ow','oh','colors','fit','outline','outlineColor','key'].forEach(id => {
-    $(id).onchange = () => { if (V.processed.length) $('pbtn').click(); drawTimeline(); };
+    $(id).addEventListener('input', () => onParamChange(id));
   });
+  $('t0').addEventListener('change', drawTimeline);
+  $('t1').addEventListener('change', drawTimeline);
 
   function buildExports() {
     const box = $('exports'); box.innerHTML='';
