@@ -1,7 +1,7 @@
 # PixelGameDevTools —— 像素游戏美术生产工具链（可复用资产包）
 
 > 2026-09-06 自 DeepTideSurvivors（深潮幸存者）工程抽离，落位为源工程同级目录的**独立复用资产仓库**；对应源版本 commit `146da45`（抽离时快照另存于源仓 git 历史 `61ed497` 的 `reusable/` 路径，可溯）。
-> 只含**项目无关**的代码、工具与方法论文档；**不含任何美术资产、调色板、gen_* 生成脚本与第三方模板**（这些留在源工程本地仓库存档）。
+> 只含**项目无关**的代码、工具与方法论文档，**不含任何工程自产美术资产、调色板与 gen_* 生成脚本**（留在源工程本地仓库存档）；第三方模板资产包为用户购买所得，见 `asset-packs/`。
 > 文件内容与源工程保持一致未做删改，项目耦合点统一收在下方「适配清单」。
 
 ## 构成
@@ -13,6 +13,7 @@
 | `agent-pipeline/` | ZCode 多 agent 像素美术流水线定义（8 个 agent）：artist/reviewer 效率版与全量版、loop-reviewer（循环动画专项）、imitator+reviewer（有源参考的模仿绘制）、quick（形象设计快稿）；外加 pixcli skill（工具速查与门禁判读） | `.zcode/agents/`、`.zcode/skills/pixcli/` |
 | `templates/` | `pixel-art-repro.yml`：GitHub Actions 资产可复现 workflow（重跑全部 gen 脚本 → 与在盘资产逐像素 diff → pixcli 结构门禁）；`gitattributes`：PNG/GIF 等一律 binary 防换行归一化误伤；`gitignore-pixel-game`：本类工程的 .gitignore 起步模板 | 源工程同名文件 |
 | `knowledge/` | 方法论与调研沉淀：`像素法则.md`（Saint11 教学方法提炼，**含版权口径说明**）、`参考图生成约束.md`、`即梦生图-Mac自动化手册.md`、`research/` 3 篇调研总结（像素画 agent 生态 / 工程分析与工作流 / 轻量像素工具）；另含 `saint11-tutorials/` 教程卡原图归档（81 件，2026-09-06 自源工程迁入，**.gitignore 不入库**、仅本机私有学习，红线见其 README） | `docs/` |
+| `asset-packs/` | 第三方模板资产包（**用户购买所得**，用户声明拥有使用权利；包内未随附许可文件，再分发边界以购买渠道条款为准）：`top-down-asset-pack/`（俯视 topdown 人形动作包，idle/walk/run/attack × 8 朝向，64×64/96×96 格）+ `2d-pixel-art-character-template/`（48×48 侧视动作模板包，备用参考）；模仿模式的动作源，规格与接线见其 README | 源工程 `assets/template/` |
 
 ## 复用步骤（新工程）
 
@@ -36,7 +37,7 @@
 
 ## 红线与许可
 
-- 本包**不含**美术资产、调色板 JSON、gen_* 生成脚本、第三方模板与参考图——均留在源工程本地仓库存档，不随本包分发
+- 本包不含**工程自产**美术资产（sprites/tiles）、调色板 JSON、gen_* 生成脚本与参考图——均留在源工程本地仓库存档，不随本包分发；`asset-packs/` 第三方模板包为**用户购买所得**（用户声明拥有使用权利），随本包入库
 - 外部内容义务**不随本包转移**：源工程美术含 Penusbmic「cutest hero」忠实复刻系（署名义务随资产走，资产未入本包）；`knowledge/像素法则.md` 是对 Saint11（Pedro Medeiros）公开教学的方法论提炼转述，其版权口径见该文头部。**教程卡原图归档**存于 `knowledge/saint11-tutorials/` 但**已加入 .gitignore 不纳入 git**——git 追踪内容（即可外发部分）不含任何外部素材；归档仅本机私有学习、不得外发，红线见其 README，该文头部声明应保留
 - `knowledge/` 其余文档为调研与方法沉淀，无外部内容嵌入
 
