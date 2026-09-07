@@ -76,7 +76,8 @@ fieldset {
   padding:10px 16px 14px; background:var(--panel);
   box-shadow:inset 0 1px 0 rgba(255,255,255,.03);   /* Linear：抬升面板顶缘的微弱白色高光 */
 }
-legend { font-size:12px; font-weight:500; color:var(--sub); letter-spacing:.4px; padding:0 8px; }
+/* 卡片标题：不用 <legend>（原生会把文字骑在边框上、一半在块外），改普通元素放块内左上 */
+.cap { font-size:12px; font-weight:500; color:var(--sub); letter-spacing:.4px; margin:0 0 10px; }
 
 /* ── 表单行与输入控件（text-input：canvas 内嵌底 + hairline，焦点环 2px lavender@50%）
    行结构约定：控件一行（label 固定列宽 60px 对齐），说明文字一律 .hint 独立成行，
@@ -207,13 +208,13 @@ th,td { padding:3px 6px; text-align:left; }
     <input type="file" id="file" accept="video/*" hidden>
     <div id="vmeta"></div>
 
-    <fieldset><legend>① 裁剪区间</legend>
+    <fieldset aria-label="① 裁剪区间"><div class="cap">① 裁剪区间</div>
       <div class="hint">可添加多段，拍完一段接下一段；区间不重叠，播放顺序=列表顺序</div>
       <div id="ranges"></div>
       <div class="row"><button id="addRange" class="mini">+ 添加区间</button></div>
     </fieldset>
 
-    <fieldset><legend>② 采样帧率</legend>
+    <fieldset aria-label="② 采样帧率"><div class="cap">② 采样帧率</div>
       <div class="row"><label>帧率</label><input type="number" id="fps" step="0.1" min="1" value="24"><span class="unit">帧/秒</span></div>
       <div class="row sub">
         <button class="mini" data-fps="12">12</button>
@@ -225,7 +226,7 @@ th,td { padding:3px 6px; text-align:left; }
       <div class="hint">源 24fps 时：24=全帧、12=减半</div>
     </fieldset>
 
-    <fieldset><legend>③ 标准化参数</legend>
+    <fieldset aria-label="③ 标准化参数"><div class="cap">③ 标准化参数</div>
       <div class="field">
         <div class="row"><label>主体尺寸</label><input type="number" id="ow" min="1" value="64"><span class="unit">×</span><input type="number" id="oh" min="1" value="64"><span class="unit">px</span></div>
         <div class="hint">等比缩放主体到该尺寸</div>
@@ -278,7 +279,7 @@ th,td { padding:3px 6px; text-align:left; }
 
   <!-- 右：导出方案 + 统计 -->
   <section id="right">
-    <fieldset><legend>④ 导出方案</legend>
+    <fieldset aria-label="④ 导出方案"><div class="cap">④ 导出方案</div>
       <div class="hint">可多选；处理完成后点每项下载</div>
       <div class="row"><input type="checkbox" id="expHtml" checked><label>HTML 播放器</label></div>
       <div class="row"><input type="checkbox" id="expGif" checked><label>GIF</label></div>
@@ -286,11 +287,11 @@ th,td { padding:3px 6px; text-align:left; }
       <div class="row"><input type="checkbox" id="expPngs" checked><label>PNG 帧序列</label></div>
       <div class="row"><button id="dlZip" class="mini">导出 ZIP（帧 PNG 打包）</button></div>
     </fieldset>
-    <fieldset><legend>帧统计</legend>
+    <fieldset aria-label="帧统计"><div class="cap">帧统计</div>
       <table id="fstats"></table>
       <div class="hint">校验口径（pixcli check）：尺寸 / alpha 两态 / 色数 ≤16 / 连通域 / 孤立像素提示（P2）</div>
     </fieldset>
-    <fieldset><legend>导出</legend>
+    <fieldset aria-label="导出"><div class="cap">导出</div>
       <div class="exp-bar" id="exports"></div>
       <div class="hint" id="expNote">点「▶ 处理」后在此生成导出项。</div>
     </fieldset>
