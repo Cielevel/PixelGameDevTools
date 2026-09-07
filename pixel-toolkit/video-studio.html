@@ -50,7 +50,7 @@ th,td { padding:2px 6px; text-align:left; }
 <header>
   <h1>🎞️ Video-Std 视频像素化工作台</h1>
   <span class="sub">AI 像素视频 → 标准像素动画（区间 · 采样帧率 · 预览 · 多格式导出）</span>
-  <span class="sub" style="margin-left:auto; opacity:.6">v1.4</span>
+  <span class="sub" style="margin-left:auto; opacity:.6">v1.5</span>
 </header>
 <main>
   <!-- 左：设置 -->
@@ -588,13 +588,15 @@ function exportHtml() {
 
 function exportGif() {
   const frames = V.processed, w=frames[0].width, h=frames[0].height;
-  const canvas = document.createElement('canvas'); canvas.width=w; canvas.height=h;
-  const cc = canvas.getContext('2d'); cc.imageSmoothingEnabled=false;
-  const gif = new GIFEncoder({ width:w, height:h }); gif.begin();
-  for (const f of frames) { cc.clearRect(0,0,w,h); cc.drawImage(imageDataToCanvas(f),0,0,w,h);
-    gif.addFrame(cc.getImageData(0,0,w,h)); }
+  // 帧延迟：GIF 单位 1/100s；<2 会被多数查看器钳到 10（反而变慢），故下限 2
+  const delay = Math.max(2, Math.round(100 / Math.max(1, +$('fps').value || 12)));
+  const gif = new GIFEncoder({ width:w, height:h, delay });
+  gif.begin();
+  for (const f of frames) gif.addFrame(f);
   gif.finish();
-  download('animation.gif', gif.blobURL());
+  const u = gif.blobURL();
+  download('animation.gif', u);
+  setTimeout(() => URL.revokeObjectURL(u), 5000);
 }
 
 function exportSheet() {
@@ -657,68 +659,61 @@ function exportZip() {
   setTimeout(()=>URL.revokeObjectURL(a.href), 500);
 }
 
-/* GIF 编码器（最小实现：全局调色板 + LZW）——仅支持 256 色内，帧 64×64 够用 */
+/* GIF 编码器（全局调色板 + LZW）——帧为 {width,height,data}（RGBA，alpha 两态） */
 class GIFEncoder {
-  constructor({width,height}) { this.w=width; this.h=height; this.frames=[]; }
+  constructor({width,height,delay}) { this.w=width; this.h=height; this.delay=delay||4; this.frames=[]; }
   begin() {}
   addFrame(imgData) { this.frames.push(imgData); }
   finish() { this.blob = this.#encode(); }
   blobURL() { return URL.createObjectURL(this.blob); }
-  #encode() { return gifEncode(this.w, this.h, this.frames); }
+  #encode() { return gifEncode(this.w, this.h, this.frames, this.delay); }
 }
 
 /* GIF89a 编码（LZW + 全局调色板）：帧序列 → Blob。
-   取自像素画工具常用实现（桌面端有完整 GIF 导出；此处嵌入浏览器端等价物，
-   支持透明像素转单色、≤256 色自动量化到最近色）。 */
-function gifEncode(w, h, frameDataArr) {
-  // 收集全部像素颜色（不透明）→ 全局调色板（最多 255 色 + 1 透明索引 0）
+   全局色表（索引 0=透明）+ NETSCAPE 无限循环 + 每帧 GCE（disposal=2 恢复透明背景，
+   防上一帧残影）。LZW 根码宽必须覆盖全部调色板索引（不能固定 2）。
+   >255 色时保留出现频次最高的 255 色，超出色兜底映射到 1 号色。 */
+function gifEncode(w, h, frameDataArr, delayCs) {
   const colorCount = new Map();
   for (const fd of frameDataArr) {
     const d = fd.data;
     for (let i=0;i<d.length;i+=4) { if (d[i+3] < 128) continue;
       const k=(d[i]<<16)|(d[i+1]<<8)|d[i+2]; colorCount.set(k,(colorCount.get(k)||0)+1); }
   }
-  const all = Array.from(colorCount, ([k,n])=>[(k>>16)&255,(k>>8)&255,k&255]);
-  let pal;
-  if (all.length <= 255) pal = all;
-  else {
-    // 简化平均分桶：取出现最多的 255 色（像素动画常见 ≤64 色，此分支极少触发）
-    pal = all.sort((a,b)=>(colorCount.get((b[0]<<16)|(b[1]<<8)|b[2])||0)-(colorCount.get((a[0]<<16)|(a[1]<<8)|a[2])||0)).slice(0,255);
-  }
-  // 索引表：0=透明，1..=颜色
+  const all = Array.from(colorCount, ([k,n])=>[(k>>16)&255,(k>>8)&255,k&255,n]);
+  let items = all;                                        // [r,g,b,出现次数]
+  if (all.length > 255) items = all.sort((a,b)=>b[3]-a[3]).slice(0,255);   // 像素动画常见 ≤64 色，此分支极少触发
+  const pal = items.map(c=>[c[0],c[1],c[2]]);            // 剥离计数字节（带 n 写色表会越界/污染下一项）
   const idxOf = new Map();
-  pal.forEach((c,i)=>idxOf.set((c[0]<<16)|(c[1]<<8)|c[2], i+1));
-  // 色表字节数补齐到 2 的幂
-  const tblSize = 1 << Math.ceil(Math.log2(pal.length*2));  // 含透明位的表
-  const gct = new Uint8Array(tblSize*3);
-  gct.set(new Uint8Array([0,0,0]), 0);   // 索引 0 透明
+  pal.forEach((c,i)=>idxOf.set((c[0]<<16)|(c[1]<<8)|c[2], i+1));   // 颜色→1..；0 留给透明
+  // 色表项数 = 2 的幂（含透明索引），上限 256
+  const tblSize = Math.min(256, 2 ** Math.ceil(Math.log2(Math.max(2, pal.length + 1))));
+  const sizeField = Math.log2(tblSize) - 1;             // 0..7，写进 LSD 的 packed 字节
+  const gct = new Uint8Array(tblSize*3);                // 全 0 初始化：索引 0 透明（0,0,0）
   pal.forEach((c,i)=>{ gct.set(c, (i+1)*3); });
 
-  const bytes = [0x47,0x49,0x46,0x38,0x39,0x61];  // GIF89a
-  const put16 = v => { bytes.push(v&255, v>>8); };
+  const bytes = [0x47,0x49,0x46,0x38,0x39,0x61];        // GIF89a
+  const put16 = v => { bytes.push(v&255, (v>>8)&255); };
   put16(w); put16(h);
-  const gctSize = Math.log2(tblSize/1) - 1;
-  bytes.push(0x80 | (gctSize & 0x07));   // 全局色表
-  bytes.push(0, 0, 0);
+  bytes.push(0x80 | sizeField, 0, 0);                   // 全局色表标志+尺寸 / 背景索引 / 宽高比
   for (const b of gct) bytes.push(b);
+  // NETSCAPE2.0 循环扩展：无限循环（缺失时部分查看器只播一遍）
+  bytes.push(0x21,0xFF,0x0B, ...Array.from('NETSCAPE2.0',c=>c.charCodeAt(0)), 0x03,0x01,0,0, 0x00);
 
-  // 每帧：GCE(透明) + 图像描述 + LZW 数据
-  const lzwMin = 2;
+  const dLo = delayCs & 255, dHi = (delayCs>>8) & 255;
+  const lzwMin = Math.max(2, Math.log2(tblSize));       // 根码宽 ≥2 且覆盖全部调色板索引
   for (const fd of frameDataArr) {
     const d = fd.data;
-    // 帧像素 → 索引
     const idx = new Uint8Array(w*h);
     for (let i=0;i<d.length;i+=4) {
       const p = i/4;
       if (d[i+3] < 128) { idx[p]=0; continue; }
-      const k=(d[i]<<16)|(d[i+1]<<8)|d[i+2];
-      idx[p] = idxOf.get(k) || 1;
+      idx[p] = idxOf.get((d[i]<<16)|(d[i+1]<<8)|d[i+2]) || 1;
     }
-    // GCE：透明索引 0，disposal=1
-    bytes.push(0x21,0xF9,0x04,0x01,0,0,0,0,0x00);
-    // 图像描述
-    bytes.push(0x2C); put16(0); put16(0); put16(w); put16(h); bytes.push(gctSize & 0x07);
-    // LZW 压缩子块
+    // GCE 共 8 字节：disposal=2（清屏恢复背景）+ 透明标志 + 透明索引 0 + 延迟
+    bytes.push(0x21,0xF9,0x04,0x09, dLo, dHi, 0x00, 0x00);
+    // 图像描述 packed=0：无局部色表、无隔行
+    bytes.push(0x2C); put16(0); put16(0); put16(w); put16(h); bytes.push(0);
     const lzw = lzwEncode(idx, lzwMin);
     bytes.push(lzwMin);
     for (let i=0;i<lzw.length;i+=255) { const chunk=lzw.slice(i,i+255); bytes.push(chunk.length); for (const b of chunk) bytes.push(b); }
@@ -730,22 +725,17 @@ function gifEncode(w, h, frameDataArr) {
 
 function lzwEncode(indices, minCodeSize) {
   const clearCode = 1 << minCodeSize, eoiCode = clearCode+1;
-  let out = [], cur = [], codeSize = minCodeSize+1;
+  let codeSize = minCodeSize+1, nextCode = eoiCode+1;
   const dict = new Map();
-  const codeOf = k => dict.get(k);
-  function resetDict(){ dict.clear(); for(let i=0;i<clearCode;i++) dict.set(String.fromCharCode(i), i); codeSize = minCodeSize+1; }
-  function emit(code, sz) {
-    // 写入 LSB-first 位流
-    cur.push(code);
-    out = cur; cur = [];
-    return out, cur;
-  }
-  // 简单位流缓冲
+  const resetDict = () => { dict.clear(); for (let i=0;i<clearCode;i++) dict.set(String.fromCharCode(i), i); codeSize = minCodeSize+1; nextCode = eoiCode+1; };
   let bitBuf=0, bitCnt=0;
   const outBytes=[];
-  function writeCode(code, sz) { bitBuf |= code << bitCnt; bitCnt += sz; while (bitCnt >= 8) { outBytes.push(bitBuf & 255); bitBuf >>= 8; bitCnt -= 8; } }
+  const writeCode = (code, sz) => { bitBuf |= code << bitCnt; bitCnt += sz; while (bitCnt >= 8) { outBytes.push(bitBuf & 255); bitBuf >>= 8; bitCnt -= 8; } };
+  // 码宽提升的时机是关键：解码端每收到一个码才补写一条词条，整体比编码端滞后一码，
+  // 因此必须在「发码之后、写新词条之前」判断加宽；若放到新增词条之后再加宽，会提前
+  // 一码切换位宽使解码端位流失步 → 帧内容错乱（与 Weiner LZWEncoder 的 output() 同序）。
+  const emit = (code) => { writeCode(code, codeSize); if (nextCode >= (1<<codeSize) && codeSize < 12) codeSize++; };
   resetDict();
-  let nextCode = eoiCode+1;
   writeCode(clearCode, codeSize);
   let prev = null;
   for (let i=0;i<indices.length;i++) {
@@ -753,13 +743,12 @@ function lzwEncode(indices, minCodeSize) {
     if (prev === null) { prev = String.fromCharCode(k); continue; }
     const key = prev + String.fromCharCode(k);
     if (dict.has(key)) { prev = key; continue; }
-    writeCode(codeOf(prev), codeSize);
-    dict.set(key, nextCode++);
-    if (nextCode === (1 << codeSize) && codeSize < 12) codeSize++;
-    else if (nextCode >= 4096) { writeCode(clearCode, codeSize); resetDict(); nextCode = eoiCode+1; }
+    emit(dict.get(prev));
+    if (nextCode >= 4096) { writeCode(clearCode, codeSize); resetDict(); }   // 词条表满：发 clear 重建
+    else dict.set(key, nextCode++);
     prev = String.fromCharCode(k);
   }
-  if (prev !== null) writeCode(codeOf(prev), codeSize);
+  if (prev !== null) emit(dict.get(prev));
   writeCode(eoiCode, codeSize);
   if (bitCnt) outBytes.push(bitBuf & 255);
   return outBytes;
