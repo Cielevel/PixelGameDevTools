@@ -18,13 +18,24 @@ import json
 import os
 import subprocess
 import sys
+import tempfile
 import time
 from collections import Counter
 
 from PIL import Image
 
-LAB = "/tmp/pas-lab"
-VENV_BIN = os.path.join(LAB, ".venv", "bin")
+# 临时工作区用 tempfile 而非硬编码 /tmp（Windows 无 /tmp，Git Bash 只转换命令行参数、
+# 不转换 Python 字符串，硬编码会落到盘符根目录）
+LAB = os.path.join(tempfile.gettempdir(), "pas-lab")
+# venv 布局差异：Windows 是 Scripts\<tool>.exe，macOS/Linux 是 bin/<tool>
+VENV_BIN = os.path.join(LAB, ".venv", "Scripts" if os.name == "nt" else "bin")
+
+
+def venv_tool(name):
+    """venv 内可执行文件完整路径（含 Windows 的 .exe 后缀）。"""
+    return os.path.join(VENV_BIN, name + (".exe" if os.name == "nt" else ""))
+
+
 SAMPLES = os.path.join(LAB, "samples")
 OUT = os.path.join(LAB, "out")
 GT = os.path.join(SAMPLES, "gt")
@@ -83,7 +94,7 @@ def spritegrid_cmd(extra):
     def run(in_path):
         out = in_path + ".sg.png"
         t0 = time.perf_counter()
-        subprocess.run([os.path.join(VENV_BIN, "spritegrid"), in_path, "-o", out] + extra,
+        subprocess.run([venv_tool("spritegrid"), in_path, "-o", out] + extra,
                        check=True, capture_output=True)
         dt = time.perf_counter() - t0
         return Image.open(out).convert("RGBA"), dt
@@ -93,7 +104,7 @@ def ppa_cmd(extra):
     def run(in_path):
         out = in_path + ".ppa.png"
         t0 = time.perf_counter()
-        subprocess.run([os.path.join(VENV_BIN, "ppa"), in_path, "-o", out] + extra,
+        subprocess.run([venv_tool("ppa"), in_path, "-o", out] + extra,
                        check=True, capture_output=True)
         dt = time.perf_counter() - t0
         return Image.open(out).convert("RGBA"), dt
@@ -226,7 +237,7 @@ def main():
                 name, tag, str(m["raw_size"]), m["colors"], m["match_tol"], m["match"], str(m["match_off"]),
                 m["offpal"], m["bleed"], str(idem["idem"]), dt,
                 "det={}".format(det) if det else ""))
-    with open(os.path.join(LAB, "results.json"), "w") as f:
+    with open(os.path.join(LAB, "results.json"), "w", encoding="utf-8") as f:
         json.dump(results, f, ensure_ascii=False, indent=1)
     print("\nresults.json 写入完成")
 

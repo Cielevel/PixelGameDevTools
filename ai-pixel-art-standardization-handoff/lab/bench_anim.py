@@ -9,12 +9,21 @@ import io
 import os
 import subprocess
 import sys
+import tempfile
 from collections import Counter
 
 from PIL import Image
 
-LAB = "/tmp/pas-lab"
-VENV_BIN = os.path.join(LAB, ".venv", "bin")
+# 临时工作区用 tempfile 而非硬编码 /tmp；venv 布局 Windows=Scripts/<tool>.exe，Unix=bin/<tool>
+LAB = os.path.join(tempfile.gettempdir(), "pas-lab")
+VENV_BIN = os.path.join(LAB, ".venv", "Scripts" if os.name == "nt" else "bin")
+
+
+def venv_tool(name):
+    """venv 内可执行文件完整路径（含 Windows 的 .exe 后缀）。"""
+    return os.path.join(VENV_BIN, name + (".exe" if os.name == "nt" else ""))
+
+
 SAMPLES = os.path.join(LAB, "samples")
 OUT = os.path.join(LAB, "out_anim")
 sys.path.insert(0, LAB)
@@ -66,12 +75,12 @@ def run_baseline(p):
 
 def run_spritegrid(p):
     out = p + ".sg.png"
-    subprocess.run([os.path.join(VENV_BIN, "spritegrid"), p, "-o", out], check=True, capture_output=True)
+    subprocess.run([venv_tool("spritegrid"), p, "-o", out], check=True, capture_output=True)
     return Image.open(out).convert("RGBA")
 
 def run_ppa(p):
     out = p + ".ppa.png"
-    subprocess.run([os.path.join(VENV_BIN, "ppa"), p, "-o", out], check=True, capture_output=True)
+    subprocess.run([venv_tool("ppa"), p, "-o", out], check=True, capture_output=True)
     return Image.open(out).convert("RGBA")
 
 def run_pixfix(p):
@@ -155,7 +164,7 @@ except Exception as e:
     print("spritegrid 共享网格失败:", str(e)[:120])
 try:
     outdir = os.path.join(OUT, "ppa_gif")
-    subprocess.run([os.path.join(VENV_BIN, "ppa"), gif_path, "-o", outdir], check=True, capture_output=True)
+    subprocess.run([venv_tool("ppa"), gif_path, "-o", outdir], check=True, capture_output=True)
     got = sorted([os.path.join(outdir, f) for f in os.listdir(outdir) if f.lower().endswith((".png", ".gif"))])
     frames = [Image.open(p).convert("RGBA") for p in got]
     # 单个 GIF 文件时拆多帧
