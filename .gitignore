@@ -1,2 +1,11 @@
 # macOS
 .DS_Store
+
+# Windows
+Thumbs.db
+desktop.ini
+
+# Python 运行产物与虚拟环境
+__pycache__/
+*.pyc
+.venv/

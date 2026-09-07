@@ -1,0 +1,16 @@
+# Auto detect text files and perform LF normalization
+* text=auto
+
+# 资产一律二进制：防换行归一化误伤（跨 Windows/macOS 同步）
+# 匹配区分大小写，大写扩展名单列（knowledge/saint11-tutorials/*.GIF）
+*.png binary
+*.gif binary
+*.GIF binary
+*.ase binary
+*.aseprite binary
+*.jpg binary
+*.jpeg binary
+*.mp4 binary
+*.webm binary
+*.mov binary
+*.zip binary
