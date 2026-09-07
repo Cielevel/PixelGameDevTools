@@ -4,53 +4,179 @@
 <meta charset="utf-8">
 <title>Video-Std 视频像素化工作台</title>
 <style>
-:root { --bg:#1e2229; --panel:#262b34; --edge:#3a4150; --txt:#d8dde6; --sub:#9aa4b2; --acc:#4da3ff; --ok:#3fbf7f; --warn:#e0a03f; }
+/* ── Linear 设计系统 token（source: VoltAgent/awesome-design-md → design-md/linear.app）
+   表面阶梯 canvas→surface1/2/3 + 发丝线边框承载层次，无渐变、无投影；
+   薰衣草蓝 --acc 只用于：品牌色标 / 主 CTA / 焦点环（Linear 稀缺用色原则）。
+   --bg/--panel/--edge/--txt/--sub/--acc/--ok/--warn 被 JS 内联样式引用，名称不可改 ── */
+:root {
+  --bg:#010102;            /* canvas：近纯黑、微蓝调 */
+  --panel:#0f1011;         /* surface-1：卡片/面板/次级按钮 */
+  --panel-2:#141516;       /* surface-2：hover/抬升面 */
+  --panel-3:#18191a;       /* surface-3：按压面 */
+  --edge:#23252a;          /* hairline */
+  --edge-hi:#34343a;       /* hairline-strong */
+  --txt:#d0d6e0;           /* ink-muted：正文 */
+  --ink:#f7f8f8;           /* ink：强调文本/数值 */
+  --sub:#8a8f98;           /* ink-subtle */
+  --dim:#62666d;           /* ink-tertiary */
+  --acc:#5e6ad2;           /* lavender */
+  --acc-hov:#828fff;
+  --acc-foc:#5e69d1;
+  --ok:#27a644;
+  --warn:#d99a3d;
+}
 * { box-sizing:border-box; }
-body { margin:0; background:var(--bg); color:var(--txt); font:13px/1.5 "PingFang SC","Microsoft YaHei",system-ui,sans-serif; }
-header { padding:8px 14px; background:var(--panel); border-bottom:1px solid var(--edge); display:flex; gap:12px; align-items:center; }
-header h1 { font-size:15px; margin:0; font-weight:600; }
-header .sub { color:var(--sub); font-size:12px; }
-main { display:grid; grid-template-columns:300px 1fr 260px; grid-template-rows:1fr auto; grid-gap:0; height:calc(100vh - 45px); }
-section { overflow:auto; padding:12px; }
+html, body { height:100%; }
+body {
+  margin:0; color:var(--txt); background:var(--bg);
+  font:13px/1.55 "Inter","SF Pro Text",-apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",system-ui,sans-serif;
+  display:flex; flex-direction:column;
+  -webkit-font-smoothing:antialiased;
+}
+::-webkit-scrollbar { width:10px; height:10px; }
+::-webkit-scrollbar-thumb { background:#26272a; border-radius:8px; border:2px solid var(--bg); }
+::-webkit-scrollbar-thumb:hover { background:#34343a; }
+::-webkit-scrollbar-track { background:transparent; }
+::selection { background:rgba(94,106,210,.4); }
+
+/* ── 顶栏 = Linear top-nav（canvas 底 / 56px / 发丝底线） ── */
+header {
+  flex:none; height:56px; padding:0 20px;
+  display:flex; gap:14px; align-items:center;
+  background:var(--bg); border-bottom:1px solid var(--edge);
+}
+header h1 {
+  display:flex; align-items:center; gap:9px; margin:0;
+  font-size:14px; font-weight:600; letter-spacing:-.2px; color:var(--ink); white-space:nowrap;
+}
+header h1::before {   /* 品牌色标：薰衣草方块 */
+  content:""; width:10px; height:10px; border-radius:3px;
+  background:var(--acc); box-shadow:0 0 0 1px rgba(94,106,210,.35);
+}
+header .sub { color:var(--sub); font-size:12px; min-width:0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+#status {   /* 状态胶囊（status-badge）：JS 会内联覆盖 color（--warn=异常 / --sub=常规） */
+  flex:none; max-width:440px; font-size:12px; color:var(--sub);
+  font-family:ui-monospace,"Cascadia Mono","JetBrains Mono",Consolas,monospace;
+  background:var(--panel-2); border:1px solid var(--edge); border-radius:999px; padding:3px 12px;
+  white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+}
+#status:empty { display:none; }
+
+/* ── 三栏：输入参数 | 预览 | 输出导出 ── */
+main { flex:1; min-height:0; display:grid; grid-template-columns:336px minmax(0,1fr) 336px; grid-template-rows:minmax(0,1fr); }
+section { overflow:auto; min-height:0; min-width:0; padding:16px 18px 20px; }
 #left { border-right:1px solid var(--edge); }
-#center { display:flex; flex-direction:column; align-items:center; }
+#center { display:flex; flex-direction:column; padding:18px 24px; }
 #right { border-left:1px solid var(--edge); }
-h2 { font-size:13px; color:var(--sub); margin:0 0 8px; font-weight:600; text-transform:uppercase; letter-spacing:.5px; }
-fieldset { border:1px solid var(--edge); border-radius:6px; margin:0 0 10px; padding:8px 10px; }
-legend { font-size:12px; color:var(--sub); padding:0 6px; }
-.row { display:flex; gap:6px; align-items:center; margin:6px 0; flex-wrap:wrap; }
+
+/* ── 眉题（eyebrow：正字距）与卡片（feature-card：surface-1 + hairline + 12px 圆角） ── */
+h2 { font-size:12px; font-weight:500; color:var(--sub); letter-spacing:.4px; margin:2px 0 10px; }
+fieldset {
+  border:1px solid var(--edge); border-radius:12px; margin:0 0 12px;
+  padding:10px 16px 14px; background:var(--panel);
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.03);   /* Linear：抬升面板顶缘的微弱白色高光 */
+}
+legend { font-size:12px; font-weight:500; color:var(--sub); letter-spacing:.4px; padding:0 8px; }
+
+/* ── 表单行与输入控件（text-input：canvas 内嵌底 + hairline，焦点环 2px lavender@50%） ── */
+.row { display:flex; gap:6px; align-items:center; margin:7px 0; flex-wrap:wrap; }
 label { color:var(--sub); }
-input[type=text],input[type=number],input[type=color],select { background:#1a1e25; border:1px solid var(--edge); color:var(--txt); border-radius:4px; padding:3px 6px; font:inherit; }
-input[type=number] { width:70px; }
-input[type=checkbox] { accent-color:var(--acc); }
-button { background:#2b323d; border:1px solid var(--edge); color:var(--txt); border-radius:4px; padding:4px 10px; font:inherit; cursor:pointer; }
-button:hover { background:#343d4a; }
-button.primary { background:var(--acc); border-color:var(--acc); color:#fff; font-weight:600; }
-button.primary:hover { filter:brightness(1.1); }
-button.mini { padding:2px 6px; font-size:12px; }
-#drop { width:100%; height:200px; border:2px dashed var(--edge); border-radius:8px; display:flex; align-items:center; justify-content:center; text-align:center; color:var(--sub); cursor:pointer; }
-#drop.hover { border-color:var(--acc); color:var(--acc); }
-#vstage { position:relative; background:#14161a; border:1px solid var(--edge); border-radius:6px; overflow:hidden; }
-#vstage img,#vstage canvas { display:block; background:repeating-conic-gradient(#2a2e35 0 25%, #1f242b 0 50%) 0 0/24px 24px; }
-#vmeta { margin-top:8px; color:var(--sub); font-size:12px; white-space:pre; }
-#previewbar { width:100%; display:flex; gap:8px; align-items:center; margin-top:8px; flex-wrap:wrap; }
-#previewbar input[type=range] { flex:1; }
-#status { margin-top:6px; font-size:12px; color:var(--sub); min-height:18px; }
-#timeline { width:100%; margin-top:6px; }
+.note, .legend { color:var(--sub); font-size:12px; }
+input[type=text],input[type=number],select {
+  background:var(--bg); border:1px solid var(--edge); color:var(--txt);
+  border-radius:8px; padding:4px 8px; font:inherit;
+  transition:border-color .12s ease;
+}
+input[type=text]:hover,input[type=number]:hover,select:hover { border-color:var(--edge-hi); }
+input[type=text]:focus,input[type=number]:focus,select:focus {
+  outline:2px solid rgba(94,106,210,.5); outline-offset:-1px; border-color:var(--acc-foc);
+}
+input[type=number] { width:70px; font-variant-numeric:tabular-nums; }
+input[type=checkbox] { accent-color:var(--acc); width:15px; height:15px; cursor:pointer; }
+input[type=color] {
+  background:var(--bg); border:1px solid var(--edge); border-radius:6px;
+  padding:1px; width:40px; height:26px; cursor:pointer;
+}
+select { cursor:pointer; }
+input[type=range] { accent-color:var(--acc); }
+
+/* ── 按钮：primary=薰衣草 CTA / 默认=secondary（surface-1 + hairline）/ mini=紧凑档 ── */
+button {
+  background:var(--panel); border:1px solid var(--edge); color:var(--txt);
+  border-radius:8px; padding:5px 12px; font:inherit; font-weight:500; cursor:pointer;
+  transition:background .12s ease, border-color .12s ease;
+}
+button:hover { background:var(--panel-2); border-color:var(--edge-hi); }
+button:active { background:var(--panel-3); }
+button:focus-visible { outline:2px solid rgba(94,106,210,.5); outline-offset:1px; }
+button:disabled { opacity:.45; cursor:not-allowed; }
+button.primary { background:var(--acc); border-color:var(--acc-foc); color:#fff; }
+button.primary:hover { background:var(--acc-hov); border-color:var(--acc-hov); }
+button.primary:active { background:var(--acc-foc); }
+button.mini { padding:3px 9px; font-size:12px; border-radius:6px; }
+
+/* ── 拖放区（唯一允许 lavender 提示的交互位：主导入 CTA） ── */
+#drop {
+  width:100%; min-height:150px;
+  border:1px dashed var(--edge-hi); border-radius:12px; background:var(--bg);
+  display:flex; flex-direction:column; gap:4px; align-items:center; justify-content:center;
+  text-align:center; color:var(--sub); cursor:pointer;
+  transition:border-color .15s ease, color .15s ease, box-shadow .15s ease;
+}
+#drop::before { content:"↓"; font-size:20px; line-height:1; color:var(--dim); margin-bottom:2px; transition:color .15s ease; }
+#drop:hover { border-color:var(--acc); color:var(--txt); }
+#drop:hover::before { color:var(--acc-hov); }
+#drop.hover { border-color:var(--acc); color:var(--acc-hov); box-shadow:0 0 0 2px rgba(94,106,210,.5); }
+
+/* ── 预览舞台（product-screenshot-card：surface-1 + 16px 圆角 + 顶缘高光） ── */
+#vstage {
+  position:relative; width:100%; min-height:280px;
+  display:flex; align-items:center; justify-content:center;
+  background:var(--panel); border:1px solid var(--edge); border-radius:16px;
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.03); overflow:hidden;
+}
+#vstage img,#vstage canvas { display:block; background:repeating-conic-gradient(#141516 0 25%, #0d0e10 0 50%) 0 0/24px 24px; border-radius:2px; }
+#vmeta {
+  margin-top:10px; color:var(--sub); font-size:12px; white-space:pre;
+  font-family:ui-monospace,"Cascadia Mono","JetBrains Mono",Consolas,monospace;
+  background:var(--bg); border:1px solid var(--edge); border-radius:8px; padding:7px 10px;
+}
+#vmeta:empty { display:none; }
+
+/* ── 预览控制条 / 时间轴 ── */
+#previewbar {
+  width:100%; display:flex; gap:8px; align-items:center; flex-wrap:wrap;
+  margin-top:12px; padding:10px 12px;
+  background:var(--panel); border:1px solid var(--edge); border-radius:12px;
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.03);
+}
+#previewbar label { margin-left:4px; }
+#previewbar input[type=range] { flex:1; min-width:90px; }
+#frameNo { color:var(--sub); font-size:12px; font-variant-numeric:tabular-nums; font-family:ui-monospace,"Cascadia Mono","JetBrains Mono",Consolas,monospace; }
+#timeline { width:100%; margin-top:10px; }
+#timeline canvas { border-radius:8px; }
 .seg { color:var(--warn); font-weight:600; }
-.exp-bar { display:flex; gap:4px; flex-wrap:wrap; margin:4px 0; }
-.note { color:var(--sub); font-size:12px; }
-.legend { color:var(--sub); font-size:12px; margin:4px 0; }
-th,td { padding:2px 6px; text-align:left; }
+
+/* ── 右栏：导出方案 / 帧统计（changelog-row 式发丝行线）/ 导出按钮 ── */
+.exp-bar { display:flex; gap:6px; flex-wrap:wrap; margin:6px 0; }
+.exp-bar button { flex:1 1 calc(50% - 3px); }
+th,td { padding:3px 6px; text-align:left; }
 #fstats { width:100%; border-collapse:collapse; font-size:12px; }
-#fstats td { border-top:1px solid var(--edge); }
+#fstats td { border-top:1px solid var(--edge); padding:6px 4px; }
+#fstats tr:first-child td { border-top:none; }
+#fstats td:first-child { color:var(--sub); }
+#fstats td:last-child {
+  text-align:right; color:var(--ink); font-variant-numeric:tabular-nums;
+  font-family:ui-monospace,"Cascadia Mono","JetBrains Mono",Consolas,monospace;
+}
 </style>
 </head>
 <body>
 <header>
-  <h1>🎞️ Video-Std 视频像素化工作台</h1>
+  <h1>Video-Std 视频像素化工作台</h1>
   <span class="sub">AI 像素视频 → 标准像素动画（区间 · 采样帧率 · 预览 · 多格式导出）</span>
   <span class="sub" style="margin-left:auto; opacity:.6">v1.5</span>
+  <div id="status"></div>
 </header>
 <main>
   <!-- 左：设置 -->
@@ -91,13 +217,6 @@ th,td { padding:2px 6px; text-align:left; }
       </div>
     </fieldset>
 
-    <fieldset><legend>④ 导出方案（可多选，导出后点每项下载）</legend>
-      <div class="row"><input type="checkbox" id="expHtml" checked><label>HTML 播放器</label></div>
-      <div class="row"><input type="checkbox" id="expGif" checked><label>GIF</label></div>
-      <div class="row"><input type="checkbox" id="expSheet" checked><label>Sprite Sheet（横向）</label></div>
-      <div class="row"><input type="checkbox" id="expPngs" checked><label>PNG 帧序列</label></div>
-      <div class="row"><button id="dlZip" class="mini">导出 ZIP（帧 PNG 打包）</button></div>
-    </fieldset>
   </section>
 
   <!-- 中：预览 -->
@@ -111,11 +230,17 @@ th,td { padding:2px 6px; text-align:left; }
       <label>帧号</label><input type="range" id="frameIdx" min="0" max="0" value="0" style="width:140px"><span id="frameNo">0/0</span>
     </div>
     <div id="timeline"></div>
-    <div id="status"></div>
   </section>
 
-  <!-- 右：统计 + 导出 -->
+  <!-- 右：导出方案 + 统计 -->
   <section id="right">
+    <fieldset><legend>④ 导出方案（可多选，导出后点每项下载）</legend>
+      <div class="row"><input type="checkbox" id="expHtml" checked><label>HTML 播放器</label></div>
+      <div class="row"><input type="checkbox" id="expGif" checked><label>GIF</label></div>
+      <div class="row"><input type="checkbox" id="expSheet" checked><label>Sprite Sheet（横向）</label></div>
+      <div class="row"><input type="checkbox" id="expPngs" checked><label>PNG 帧序列</label></div>
+      <div class="row"><button id="dlZip" class="mini">导出 ZIP（帧 PNG 打包）</button></div>
+    </fieldset>
     <h2>帧统计</h2>
     <table id="fstats"></table>
     <div class="legend">按 pixcli check 口径：尺寸 / alpha 两态 / 色数 ≤16 / 连通域 / 孤立像素提示（P2）</div>
