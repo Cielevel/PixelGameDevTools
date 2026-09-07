@@ -6,4 +6,4 @@
 
 | 目录 | 内容 | 状态 |
 |---|---|---|
-| `pixel-normal/` | 像素法线实验室：diffuse × normal 实时光照查看 + 高度图 Sobel 转法线 + Alpha 距离场 bevel | P0 查看器 + P1 转换器 + P2 距离场 bevel 已实现；P2 调色板光照/批处理待做 |
+| `pixel-normal/` | 像素法线实验室：diffuse × normal 实时光照查看 + 高度图 Sobel 转法线 + Alpha 距离场 bevel + 调色板感知光照 | P0 查看器 + P1 转换器 + P2 距离场 bevel/调色板光照已实现；P2 批处理待做 |

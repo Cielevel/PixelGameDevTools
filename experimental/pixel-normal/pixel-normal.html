@@ -253,7 +253,8 @@ button.mini { padding:3px 9px; font-size:12px; border-radius:6px; }
         </select>
       </div>
       <div class="row"><label>反绿 Y</label><input type="checkbox" id="invertY"><span class="hint" style="margin:0">DirectX（−Y）约定勾选；OpenGL（+Y）/Godot/Unity 不勾</span></div>
-      <div class="hint">量化档把光照响应分档输出，实验"保持像素画质感"的旋钮。</div>
+      <div class="row"><label>调色板</label><input type="checkbox" id="paletteLit" disabled><span class="hint" style="margin:0" id="paletteHint">先载入 diffuse 自动提取</span></div>
+      <div class="hint">量化档把光照响应分档输出，实验"保持像素画质感"的旋钮；调色板光照在其上把输出吸附回 diffuse 色集（线性域最近色）。</div>
     </fieldset>
   </section>
 
@@ -273,9 +274,9 @@ const $ = id => document.getElementById(id);
 
 /* ═══ WebGL2 初始化 ═══ */
 const canvas = $("glc");
-const gl = canvas.getContext("webgl2", { alpha:true, premultipliedAlpha:true, antialias:false, preserveDrawingBuffer:false });
+const gl = canvas.getContext("webgl2", { alpha:true, premultipliedAlpha:true, antialias:false, preserveDrawingBuffer:true });   // 可读回：像素级验证/后续批处理需要
 function fatal(msg){ $("status").textContent = msg; $("status").classList.add("err"); $("empty").innerHTML = "<b>"+msg+"</b>"; }
-let prog, uni = {}, texDiffuse = null, texNormal = null;
+let prog, uni = {}, texDiffuse = null, texNormal = null, texPal = null;
 const VS = `#version 300 es
 in vec2 aPos;
 out vec2 vUV;
@@ -288,6 +289,7 @@ precision highp float;
 in vec2 vUV;
 uniform sampler2D uDiffuse;    // 0：sRGB 固有色
 uniform sampler2D uNormal;     // 1：线性法线
+uniform sampler2D uPal;        // 2：调色板 Nx1（sRGB 字节）
 uniform vec2  uSize;           // 素材尺寸（素材像素）
 uniform vec2  uLight;          // 光源位置（素材像素，y 向上）
 uniform float uLightZ;         // 光源高度
@@ -296,6 +298,8 @@ uniform int   uQuant;          // 0=关，否则把光照响应分档
 uniform int   uInvertY;        // 1=DirectX 约定（翻转绿通道）
 uniform int   uHasNormal;
 uniform int   uMode;           // 0=光照 1=diffuse 2=normal
+uniform int   uPalLit;         // 1=调色板光照（输出吸附最近调色板色）
+uniform int   uPalCount;       // 调色板色数（0=未提取）
 out vec4 frag;
 const vec3 VIEW = vec3(0.0, 0.0, 1.0);   // 观察者恒在屏幕外沿 +Z 看
 
@@ -332,6 +336,17 @@ void main(){
   }
   lit = max(lit, 0.0);
   vec3 col = albedo*lit + vec3(spec*att);
+  if (uPalLit == 1 && uPalCount > 0) {               // 调色板光照：线性域最近色吸附（输出回到有限色集）
+    vec3 best = col; float bd = 1e9;
+    for (int i = 0; i < 64; i++) {
+      if (i >= uPalCount) break;
+      vec3 p = pow(texelFetch(uPal, ivec2(i, 0), 0).rgb, vec3(2.2));   // 调色板同样入线性域比较
+      vec3 dv = col - p;
+      float dd = dot(dv, dv);
+      if (dd < bd) { bd = dd; best = p; }
+    }
+    col = best;
+  }
   frag = vec4(pow(col, vec3(1.0/2.2))*d.a, d.a);   // 线性 → sRGB，预乘 alpha
 }`;
 
@@ -356,11 +371,12 @@ function initGL(){
   const loc = gl.getAttribLocation(prog, "aPos");
   gl.enableVertexAttribArray(loc);
   gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0);
-  for (const n of ["uDiffuse","uNormal","uSize","uLight","uLightZ","uIntensity","uAmbient","uSpec","uShininess","uQuant","uInvertY","uHasNormal","uMode"])
+  for (const n of ["uDiffuse","uNormal","uPal","uSize","uLight","uLightZ","uIntensity","uAmbient","uSpec","uShininess","uQuant","uInvertY","uHasNormal","uMode","uPalLit","uPalCount"])
     uni[n] = gl.getUniformLocation(prog, n);
   gl.uniform1i(uni.uDiffuse, 0);
   gl.uniform1i(uni.uNormal, 1);
-  texDiffuse = makeTex(0); texNormal = makeTex(1);
+  gl.uniform1i(uni.uPal, 2);
+  texDiffuse = makeTex(0); texNormal = makeTex(1); texPal = makeTex(2);
 }
 
 function makeTex(unit){
@@ -373,9 +389,18 @@ function makeTex(unit){
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
   return t;
 }
-function uploadTex(t, src){
+function uploadTex(unit, t, src){          // 显式切活动单元再绑定，避免依赖调用顺序的隐式状态
+  gl.activeTexture(gl.TEXTURE0 + unit);
   gl.bindTexture(gl.TEXTURE_2D, t);
   gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, src);
+}
+function uploadPalTex(){                   // Nx1 调色板（sRGB 字节，shader 内转线性）
+  gl.activeTexture(gl.TEXTURE2);
+  gl.bindTexture(gl.TEXTURE_2D, texPal);
+  if (!state.palette.length) { gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, 1, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array(4)); return; }
+  const data = new Uint8Array(state.palette.length*4);
+  state.palette.forEach((c, i) => { data[i*4] = c[0]; data[i*4+1] = c[1]; data[i*4+2] = c[2]; data[i*4+3] = 255; });
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, state.palette.length, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, data);
 }
 
 /* ═══ 状态 ═══ */
@@ -384,6 +409,8 @@ const state = {
   w:0, h:0, zoom:6,
   lightX:0, lightY:0,                 // 素材像素，y 向下（鼠标坐标）
   lightSeen:false,
+  palette:[],                         // diffuse 提取的调色板 [[r,g,b]…] ≤64，按频次降序
+  palTotal:0,                         // 提取到的总色数（超 64 时提示截断）
 };
 function requestRender(){
   if (requestRender._raf) return;
@@ -399,7 +426,7 @@ function render(){
   gl.viewport(0, 0, canvas.width, canvas.height);
   gl.clearColor(0, 0, 0, 0);
   gl.clear(gl.COLOR_BUFFER_BIT);
-  uploadTex(texDiffuse, state.diffuse);
+  uploadTex(0, texDiffuse, state.diffuse);
   gl.uniform2f(uni.uSize, w, h);
   gl.uniform2f(uni.uLight, state.lightX, h - 1 - state.lightY);   // 转 y 向上
   gl.uniform1f(uni.uLightZ, +$("lightZ").value);
@@ -411,7 +438,10 @@ function render(){
   gl.uniform1i(uni.uInvertY, $("invertY").checked ? 1 : 0);
   gl.uniform1i(uni.uHasNormal, state.normal ? 1 : 0);
   gl.uniform1i(uni.uMode, { lit:0, diffuse:1, normal:2 }[$("mode").value]);
-  if (state.normal) uploadTex(texNormal, state.normal);
+  gl.uniform1i(uni.uPalLit, $("paletteLit").checked ? 1 : 0);
+  gl.uniform1i(uni.uPalCount, state.palette.length);
+  if (state.normal) uploadTex(1, texNormal, state.normal);
+  if (render._palSig !== state.palSig) { render._palSig = state.palSig; uploadPalTex(); }
   gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
 }
 
@@ -424,10 +454,32 @@ function drawThumb(cv, src){
   const dw = src.width*s, dh = src.height*s;
   c.drawImage(src, (cv.width-dw)/2, (cv.height-dh)/2, dw, dh);
 }
+function extractPalette(img){              // diffuse 不透明区取色：按频次降序取前 64（shader 循环上限）
+  const c = document.createElement("canvas");
+  c.width = img.width; c.height = img.height;
+  const ctx = c.getContext("2d", { willReadFrequently:true });
+  ctx.drawImage(img, 0, 0);
+  const d = ctx.getImageData(0, 0, c.width, c.height).data;
+  const cnt = new Map();
+  for (let i = 0; i < d.length; i += 4) {
+    if (d[i+3] < 128) continue;
+    const k = (d[i] << 16) | (d[i+1] << 8) | d[i+2];
+    cnt.set(k, (cnt.get(k) || 0) + 1);
+  }
+  const sorted = [...cnt.entries()].sort((a, b) => b[1] - a[1]);
+  state.palTotal = sorted.length;
+  state.palette = sorted.slice(0, 64).map(([k]) => [k >> 16 & 255, k >> 8 & 255, k & 255]);
+  state.palSig = Symbol();
+  $("paletteHint").textContent = state.palette.length
+    ? "已提取 " + state.palTotal + " 色" + (state.palTotal > 64 ? "（按频次取前 64）" : "")
+    : "diffuse 无不透明像素，调色板光照不可用";
+  $("paletteLit").disabled = !state.palette.length;
+}
 function setDiffuse(img, name){
   state.diffuse = img; state.w = img.width; state.h = img.height;
   drawThumb($("thDiffuse"), img);
   markSlot("slotDiffuse", name, img.width + "×" + img.height);
+  extractPalette(img);
   if (!state.lightSeen) { state.lightX = state.w/2; state.lightY = state.h*0.2; state.lightSeen = true; }
   if ($("convSrc").value === "alpha") scheduleConvert();   // 距离场模式：diffuse 换图即重算
   refresh();
@@ -491,6 +543,9 @@ bindSlot("slotNormal", "fileNormal", "normal");
 bindSlot("slotHeight", "fileHeight", "height");
 $("btnClear").addEventListener("click", () => {
   state.diffuse = null; state.normal = null; state.height = null; state.lightSeen = false;
+  state.palette = []; state.palTotal = 0; state.palSig = Symbol();
+  $("paletteHint").textContent = "先载入 diffuse 自动提取";
+  $("paletteLit").disabled = true;
   clearSlot("slotDiffuse", "拖入 / 点击选择 PNG");
   clearSlot("slotNormal", "拖入 / 点击选择 PNG");
   clearSlot("slotHeight", "拖入 / 点击选择 PNG");
@@ -517,7 +572,7 @@ canvas.addEventListener("wheel", e => {
 for (const id of ["lightZ","intensity","ambient","spec","shininess"]) {
   $(id).addEventListener("input", () => { $("" + id + "v").textContent = (+$(id).value).toFixed(id === "shininess" || id === "lightZ" ? 0 : 2); requestRender(); });
 }
-for (const id of ["mode","zoom","quant","invertY"])
+for (const id of ["mode","zoom","quant","invertY","paletteLit"])
   $(id).addEventListener("change", () => { state.zoom = +$("zoom").value; requestRender(); });
 
 /* ═══ 示例素材：程序生成（高度场 → Sobel → 法线，路线 B 管线预演） ═══ */
