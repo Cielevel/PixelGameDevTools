@@ -14,6 +14,7 @@
 | `asset-packs/` | 已购第三方模板资产包（只读参考，「借动作不借皮」的源库）：`top-down-asset-pack/`（俯视 64×64 格动作包，idle/walk/run/attack × 8 朝向）、`2d-pixel-art-character-template/`（48×48 侧视动作模板包）；规格与许可边界见包内 README |
 | `templates/` | `pixel-art-repro.yml`：GitHub Actions 资产可复现 workflow（重跑全部 gen 脚本 → 与在盘资产逐像素 diff → pixcli 结构门禁）；`gitattributes`：PNG/GIF 等一律 binary 防换行归一化误伤；`gitignore-pixel-game`：本类工程的 .gitignore 起步模板 |
 | `knowledge/` | 方法论与参考资料：《像素法则》（Saint11 教学方法提炼，**含版权口径说明**）、《参考图生成约束》（生图 AI → 像素转换管线）、《即梦生图-Mac自动化手册》（参考图机器通路）、`research/` 2 篇通用调研（像素画 agent 生态 / 轻量像素工具）；`saint11-tutorials/` 教程卡原图归档（80 张，随本仓 git 入库——**本仓私有不公开**，使用边界见其 README） |
+| `experimental/` | 实验级功能孵化区（**原型阶段**）：主线工具链之外的实验，各子目录自包含、独立演化；**即便日后拆出独立成仓亦为私有库，本工具链仅自用/自研发，不对外发布**（当前 `pixel-normal/`——像素法线实验室：diffuse × normal 实时光照查看 + 高度图 Sobel 转法线，调研完成待实现） |
 
 ## 复用步骤（接入新游戏工程）
 
