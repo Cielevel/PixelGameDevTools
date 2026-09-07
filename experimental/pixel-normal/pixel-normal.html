@@ -1,0 +1,527 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<title>Pixel-Normal 像素法线实验室（P0 光照查看器）</title>
+<style>
+/* ── Linear 设计系统 token（与 video-studio 同源：表面阶梯 + 发丝线 + 稀缺薰衣草蓝） ── */
+:root {
+  --bg:#010102; --panel:#0f1011; --panel-2:#141516; --panel-3:#18191a;
+  --edge:#23252a; --edge-hi:#34343a;
+  --txt:#d0d6e0; --ink:#f7f8f8; --sub:#8a8f98; --dim:#62666d;
+  --acc:#5e6ad2; --acc-hov:#828fff; --acc-foc:#5e69d1;
+  --ok:#27a644; --warn:#d99a3d;
+}
+* { box-sizing:border-box; }
+html, body { height:100%; }
+body {
+  margin:0; color:var(--txt); background:var(--bg);
+  font:13px/1.55 "Inter","SF Pro Text",-apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",system-ui,sans-serif;
+  display:flex; flex-direction:column;
+  -webkit-font-smoothing:antialiased;
+}
+::-webkit-scrollbar { width:10px; height:10px; }
+::-webkit-scrollbar-thumb { background:#26272a; border-radius:8px; border:2px solid var(--bg); }
+::-webkit-scrollbar-thumb:hover { background:#34343a; }
+::selection { background:rgba(94,106,210,.4); }
+
+header {
+  flex:none; height:56px; padding:0 20px;
+  display:flex; gap:14px; align-items:center;
+  background:var(--bg); border-bottom:1px solid var(--edge);
+}
+header h1 {
+  display:flex; align-items:center; gap:9px; margin:0;
+  font-size:14px; font-weight:600; letter-spacing:-.2px; color:var(--ink); white-space:nowrap;
+}
+header h1::before { content:""; width:10px; height:10px; border-radius:3px; background:var(--acc); box-shadow:0 0 0 1px rgba(94,106,210,.35); }
+header .sub { color:var(--sub); font-size:12px; min-width:0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+#status {
+  flex:none; max-width:440px; margin-left:auto; font-size:12px; color:var(--sub);
+  font-variant-numeric:tabular-nums;
+  background:var(--panel-2); border:1px solid var(--edge); border-radius:999px; padding:3px 12px;
+  white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+}
+#status:empty { display:none; }
+#status.err { color:var(--warn); }
+
+main { flex:1; min-height:0; display:grid; grid-template-columns:340px minmax(0,1fr); grid-template-rows:minmax(0,1fr); }
+section { overflow:auto; min-height:0; min-width:0; padding:16px 18px 20px; }
+#left { border-right:1px solid var(--edge); }
+#center { display:flex; flex-direction:column; padding:18px 24px; }
+
+h2 { font-size:12px; font-weight:500; color:var(--sub); letter-spacing:.4px; margin:2px 0 10px; }
+fieldset {
+  border:1px solid var(--edge); border-radius:12px; margin:0 0 12px;
+  padding:10px 16px 14px; background:var(--panel);
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.03);
+}
+.cap { font-size:12px; font-weight:500; color:var(--sub); letter-spacing:.4px; margin:0 0 10px; }
+
+.row { display:flex; gap:6px; align-items:center; margin:7px 0; }
+.row > label:first-child { flex:none; width:60px; }
+label { color:var(--sub); }
+.hint { color:var(--dim); font-size:12px; line-height:1.55; margin-top:3px; word-break:keep-all; overflow-wrap:break-word; }
+.hint + .hint { margin-top:0; }
+.val { color:var(--ink); font-size:12px; min-width:38px; text-align:right; font-variant-numeric:tabular-nums; }
+
+input[type=text],input[type=number],select {
+  background:var(--bg); border:1px solid var(--edge); color:var(--txt);
+  border-radius:8px; padding:4px 8px; font:inherit;
+  transition:border-color .12s ease;
+}
+input[type=text]:hover,select:hover { border-color:var(--edge-hi); }
+input[type=text]:focus,select:focus { outline:2px solid rgba(94,106,210,.5); outline-offset:-1px; border-color:var(--acc-foc); }
+select { cursor:pointer; }
+input[type=range] { flex:1; min-width:0; accent-color:var(--acc); cursor:pointer; }
+input[type=checkbox] { accent-color:var(--acc); width:15px; height:15px; cursor:pointer; }
+
+button {
+  background:var(--panel); border:1px solid var(--edge); color:var(--txt);
+  border-radius:8px; padding:5px 12px; font:inherit; font-weight:500; cursor:pointer;
+  transition:background .12s ease, border-color .12s ease;
+}
+button:hover { background:var(--panel-2); border-color:var(--edge-hi); }
+button:active { background:var(--panel-3); }
+button:focus-visible { outline:2px solid rgba(94,106,210,.5); outline-offset:1px; }
+button.primary { background:var(--acc); border-color:var(--acc-foc); color:#fff; }
+button.primary:hover { background:var(--acc-hov); border-color:var(--acc-hov); }
+button.mini { padding:3px 9px; font-size:12px; border-radius:6px; }
+.btnbar { display:flex; gap:6px; margin-top:8px; }
+
+/* ── 素材槽：缩略图 + 名称（拖入/点击） ── */
+.slot {
+  display:flex; gap:10px; align-items:center;
+  border:1px dashed var(--edge-hi); border-radius:10px; background:var(--bg);
+  padding:7px 10px; margin:0 0 8px; cursor:pointer;
+  transition:border-color .15s ease, box-shadow .15s ease;
+}
+.slot:hover { border-color:var(--acc); }
+.slot.hover { border-color:var(--acc); box-shadow:0 0 0 2px rgba(94,106,210,.5); }
+.slot.filled { border-style:solid; }
+.slot canvas {
+  flex:none; width:44px; height:44px; border-radius:6px; background:var(--panel-2);
+  image-rendering:pixelated;
+}
+.slot .sinfo { min-width:0; }
+.slot .sname { color:var(--txt); font-size:12px; font-weight:500; }
+.slot .sfile { color:var(--dim); font-size:12px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:210px; }
+.slot input[type=file] { display:none; }
+
+/* ── 预览舞台 ── */
+.stage-head { display:flex; align-items:baseline; gap:10px; margin:2px 0 10px; }
+.stage-head h2 { margin:0; }
+#stage {
+  position:relative; flex:1; min-height:280px;
+  display:flex; align-items:center; justify-content:center;
+  background:var(--panel); border:1px solid var(--edge); border-radius:16px;
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.03); overflow:hidden;
+}
+#glc { display:none; image-rendering:pixelated; border-radius:2px; cursor:crosshair; }
+#empty {
+  color:var(--dim); font-size:13px; text-align:center; line-height:1.8; user-select:none;
+}
+#empty b { color:var(--sub); font-weight:500; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Pixel-Normal 像素法线实验室</h1>
+  <span class="sub">diffuse × normal 实时光照查看（P0 · 实验/原型）</span>
+  <div id="status"></div>
+</header>
+<main>
+  <!-- 左：素材与参数 -->
+  <section id="left">
+    <fieldset aria-label="素材"><div class="cap">素材</div>
+      <div class="slot" id="slotDiffuse">
+        <canvas id="thDiffuse" width="44" height="44"></canvas>
+        <div class="sinfo">
+          <div class="sname">Diffuse（固有色）</div>
+          <div class="sfile">拖入 / 点击选择 PNG</div>
+        </div>
+        <input type="file" id="fileDiffuse" accept="image/*">
+      </div>
+      <div class="slot" id="slotNormal">
+        <canvas id="thNormal" width="44" height="44"></canvas>
+        <div class="sinfo">
+          <div class="sname">Normal（法线）</div>
+          <div class="sfile">拖入 / 点击选择 PNG</div>
+        </div>
+        <input type="file" id="fileNormal" accept="image/*">
+      </div>
+      <div class="btnbar">
+        <button id="btnSample" class="primary mini">载入示例素材</button>
+        <button id="btnClear" class="mini">清空</button>
+      </div>
+      <div class="hint">示例素材为程序生成：史莱姆高度场 → Sobel → 法线（路线 B 管线预演）。</div>
+    </fieldset>
+
+    <fieldset aria-label="视图"><div class="cap">视图</div>
+      <div class="row"><label>显示</label>
+        <select id="mode" style="flex:1">
+          <option value="lit">光照合成</option>
+          <option value="diffuse">Diffuse 原图</option>
+          <option value="normal">Normal 原图</option>
+        </select>
+      </div>
+      <div class="row"><label>缩放</label>
+        <select id="zoom" style="flex:1">
+          <option value="2">2×</option><option value="3">3×</option><option value="4">4×</option>
+          <option value="6" selected>6×</option><option value="8">8×</option>
+          <option value="12">12×</option><option value="16">16×</option>
+        </select>
+      </div>
+      <div class="hint">鼠标在画面上移动＝移动点光源；滚轮＝调光源高度。整数倍最近邻放大。</div>
+    </fieldset>
+
+    <fieldset aria-label="光源"><div class="cap">光源</div>
+      <div class="row"><label>光高 Z</label><input type="range" id="lightZ" min="1" max="200" step="1" value="40"><span class="val" id="lightZv">40</span></div>
+      <div class="row"><label>光强</label><input type="range" id="intensity" min="0" max="3" step="0.05" value="1"><span class="val" id="intensityv">1.00</span></div>
+      <div class="row"><label>环境光</label><input type="range" id="ambient" min="0" max="1" step="0.01" value="0.12"><span class="val" id="ambientv">0.12</span></div>
+      <div class="hint">点光源悬停在画面上方，Z 越低光斑越贴面、衰减越快；白光。</div>
+    </fieldset>
+
+    <fieldset aria-label="表面响应"><div class="cap">表面响应</div>
+      <div class="row"><label>高光强</label><input type="range" id="spec" min="0" max="2" step="0.05" value="0.35"><span class="val" id="specv">0.35</span></div>
+      <div class="row"><label>高光锐度</label><input type="range" id="shininess" min="4" max="256" step="1" value="32"><span class="val" id="shininessv">32</span></div>
+      <div class="row"><label>量化档</label>
+        <select id="quant" style="flex:1">
+          <option value="0" selected>关（连续光照）</option>
+          <option value="2">2 档</option><option value="3">3 档</option><option value="4">4 档</option>
+          <option value="6">6 档</option><option value="8">8 档</option>
+          <option value="12">12 档</option><option value="16">16 档</option>
+        </select>
+      </div>
+      <div class="row"><label>反绿 Y</label><input type="checkbox" id="invertY"><span class="hint" style="margin:0">DirectX（−Y）约定勾选；OpenGL（+Y）/Godot/Unity 不勾</span></div>
+      <div class="hint">量化档把光照响应分档输出，实验"保持像素画质感"的旋钮。</div>
+    </fieldset>
+  </section>
+
+  <!-- 中：预览 -->
+  <section id="center">
+    <div class="stage-head"><h2>预览</h2><span class="hint" style="margin:0">albedo 按 sRGB 解读、法线按线性采样；光照在线性域计算后回编 sRGB</span></div>
+    <div id="stage">
+      <div id="empty"><b>拖入 diffuse + normal，或点「载入示例素材」</b><br>左槽＝固有色图　右槽＝法线图（淡紫平坦 → 有起伏）</div>
+      <canvas id="glc"></canvas>
+    </div>
+  </section>
+</main>
+
+<script>
+"use strict";
+const $ = id => document.getElementById(id);
+
+/* ═══ WebGL2 初始化 ═══ */
+const canvas = $("glc");
+const gl = canvas.getContext("webgl2", { alpha:true, premultipliedAlpha:true, antialias:false, preserveDrawingBuffer:false });
+function fatal(msg){ $("status").textContent = msg; $("status").classList.add("err"); $("empty").innerHTML = "<b>"+msg+"</b>"; }
+let prog, uni = {}, texDiffuse = null, texNormal = null;
+const VS = `#version 300 es
+in vec2 aPos;
+out vec2 vUV;
+void main(){
+  vUV = vec2(aPos.x*0.5+0.5, 0.5-aPos.y*0.5);   // uv 的 y 向下（贴图第 0 行=顶部）
+  gl_Position = vec4(aPos, 0.0, 1.0);
+}`;
+const FS = `#version 300 es
+precision highp float;
+in vec2 vUV;
+uniform sampler2D uDiffuse;    // 0：sRGB 固有色
+uniform sampler2D uNormal;     // 1：线性法线
+uniform vec2  uSize;           // 素材尺寸（素材像素）
+uniform vec2  uLight;          // 光源位置（素材像素，y 向上）
+uniform float uLightZ;         // 光源高度
+uniform float uIntensity, uAmbient, uSpec, uShininess;
+uniform int   uQuant;          // 0=关，否则把光照响应分档
+uniform int   uInvertY;        // 1=DirectX 约定（翻转绿通道）
+uniform int   uHasNormal;
+uniform int   uMode;           // 0=光照 1=diffuse 2=normal
+out vec4 frag;
+const vec3 VIEW = vec3(0.0, 0.0, 1.0);   // 观察者恒在屏幕外沿 +Z 看
+
+void main(){
+  vec4 d = texture(uDiffuse, vUV);
+  if (d.a < 0.5) discard;                          // alpha 两态约定
+  if (uMode == 1) { frag = vec4(d.rgb*d.a, d.a); return; }
+
+  vec3 nt = texture(uNormal, vUV).rgb;
+  if (uMode == 2) { frag = vec4(nt*d.a, d.a); return; }
+
+  vec3 albedo = pow(d.rgb, vec3(2.2));             // sRGB → 线性
+  vec3 N = vec3(0.0, 0.0, 1.0);
+  if (uHasNormal == 1) {
+    if (uInvertY == 1) nt.g = 1.0 - nt.g;
+    N = normalize(nt*2.0 - 1.0);
+  }
+
+  // 光照在"素材像素 × y 向上"空间进行（2D 约定：法线不做 TBN，直接屏幕空间用）
+  vec2 P = vec2(vUV.x*uSize.x, uSize.y - 1.0 - vUV.y*uSize.y);
+  vec2 dv = uLight - P;
+  vec3 L = normalize(vec3(dv, uLightZ));
+  float att = uLightZ*uLightZ / (dot(dv,dv) + uLightZ*uLightZ);   // 点光高度衰减 z²/(d²+z²)
+
+  float diff = max(dot(N,L), 0.0) * uIntensity;
+  vec3 Hv = normalize(L + VIEW);
+  float spec = pow(max(dot(N,Hv), 0.0), uShininess) * uSpec;
+
+  float lit = uAmbient + diff*att;
+  if (uQuant > 0) {                                // 量化：光照响应分档（像素质感实验旋钮）；半档取整保住暗部环境光
+    float q = float(uQuant);
+    lit  = (floor(lit*q) + 0.5) / q;
+    spec = (floor(spec*q) + 0.5) / q;
+  }
+  lit = max(lit, 0.0);
+  vec3 col = albedo*lit + vec3(spec*att);
+  frag = vec4(pow(col, vec3(1.0/2.2))*d.a, d.a);   // 线性 → sRGB，预乘 alpha
+}`;
+
+/* ── 装载入口：放在全部 let/const 声明之后调用（函数声明有提升，initGL 可引用后置的 VS/FS） ── */
+if (!gl) fatal("此浏览器不支持 WebGL2，无法运行");
+else initGL();
+
+function initGL(){
+  prog = gl.createProgram();
+  for (const [type, src] of [[gl.VERTEX_SHADER, VS], [gl.FRAGMENT_SHADER, FS]]) {
+    const sh = gl.createShader(type);
+    gl.shaderSource(sh, src); gl.compileShader(sh);
+    if (!gl.getShaderParameter(sh, gl.COMPILE_STATUS)) { fatal("shader 编译失败：" + gl.getShaderInfoLog(sh)); return; }
+    gl.attachShader(prog, sh);
+  }
+  gl.linkProgram(prog);
+  if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) { fatal("shader 链接失败：" + gl.getProgramInfoLog(prog)); return; }
+  gl.useProgram(prog);
+  const buf = gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1,-1, 1,-1, -1,1, 1,1]), gl.STATIC_DRAW);
+  const loc = gl.getAttribLocation(prog, "aPos");
+  gl.enableVertexAttribArray(loc);
+  gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0);
+  for (const n of ["uDiffuse","uNormal","uSize","uLight","uLightZ","uIntensity","uAmbient","uSpec","uShininess","uQuant","uInvertY","uHasNormal","uMode"])
+    uni[n] = gl.getUniformLocation(prog, n);
+  gl.uniform1i(uni.uDiffuse, 0);
+  gl.uniform1i(uni.uNormal, 1);
+  texDiffuse = makeTex(0); texNormal = makeTex(1);
+}
+
+function makeTex(unit){
+  const t = gl.createTexture();
+  gl.activeTexture(gl.TEXTURE0 + unit);
+  gl.bindTexture(gl.TEXTURE_2D, t);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);   // 像素画：最近邻、无 mipmap
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+  return t;
+}
+function uploadTex(t, src){
+  gl.bindTexture(gl.TEXTURE_2D, t);
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, src);
+}
+
+/* ═══ 状态 ═══ */
+const state = {
+  diffuse:null, normal:null,          // Image/Canvas
+  w:0, h:0, zoom:6,
+  lightX:0, lightY:0,                 // 素材像素，y 向下（鼠标坐标）
+  lightSeen:false,
+};
+function requestRender(){
+  if (requestRender._raf) return;
+  requestRender._raf = requestAnimationFrame(() => { requestRender._raf = 0; render(); });
+}
+function render(){
+  if (!gl || !state.diffuse) return;
+  const w = state.w, h = state.h, z = state.zoom;
+  if (canvas.width !== w*z || canvas.height !== h*z) {
+    canvas.width = w*z; canvas.height = h*z;
+    canvas.style.width = (w*z) + "px"; canvas.style.height = (h*z) + "px";
+  }
+  gl.viewport(0, 0, canvas.width, canvas.height);
+  gl.clearColor(0, 0, 0, 0);
+  gl.clear(gl.COLOR_BUFFER_BIT);
+  uploadTex(texDiffuse, state.diffuse);
+  gl.uniform2f(uni.uSize, w, h);
+  gl.uniform2f(uni.uLight, state.lightX, h - 1 - state.lightY);   // 转 y 向上
+  gl.uniform1f(uni.uLightZ, +$("lightZ").value);
+  gl.uniform1f(uni.uIntensity, +$("intensity").value);
+  gl.uniform1f(uni.uAmbient, +$("ambient").value);
+  gl.uniform1f(uni.uSpec, +$("spec").value);
+  gl.uniform1f(uni.uShininess, +$("shininess").value);
+  gl.uniform1i(uni.uQuant, +$("quant").value);
+  gl.uniform1i(uni.uInvertY, $("invertY").checked ? 1 : 0);
+  gl.uniform1i(uni.uHasNormal, state.normal ? 1 : 0);
+  gl.uniform1i(uni.uMode, { lit:0, diffuse:1, normal:2 }[$("mode").value]);
+  if (state.normal) uploadTex(texNormal, state.normal);
+  gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+}
+
+/* ═══ 素材装载 ═══ */
+function drawThumb(cv, src){
+  const c = cv.getContext("2d");
+  c.imageSmoothingEnabled = false;
+  c.clearRect(0, 0, cv.width, cv.height);
+  const s = Math.max(cv.width/src.width, cv.height/src.height);   // cover
+  const dw = src.width*s, dh = src.height*s;
+  c.drawImage(src, (cv.width-dw)/2, (cv.height-dh)/2, dw, dh);
+}
+function setDiffuse(img, name){
+  state.diffuse = img; state.w = img.width; state.h = img.height;
+  drawThumb($("thDiffuse"), img);
+  markSlot("slotDiffuse", name, img.width + "×" + img.height);
+  if (!state.lightSeen) { state.lightX = state.w/2; state.lightY = state.h*0.2; state.lightSeen = true; }
+  refresh();
+}
+function setNormal(img, name){
+  state.normal = img;
+  drawThumb($("thNormal"), img);
+  markSlot("slotNormal", name, img.width + "×" + img.height);
+  refresh();
+}
+function markSlot(id, name, dim){
+  const el = $(id);
+  el.classList.add("filled");
+  el.querySelector(".sfile").textContent = name + " · " + dim;
+}
+function clearSlot(id, label){
+  const el = $(id);
+  el.classList.remove("filled");
+  el.querySelector(".sfile").textContent = label;
+  const cv = el.querySelector("canvas"), c = cv.getContext("2d");
+  c.clearRect(0, 0, cv.width, cv.height);
+}
+function refresh(){
+  const ok = !!state.diffuse;
+  canvas.style.display = ok ? "block" : "none";
+  $("empty").style.display = ok ? "none" : "block";
+  setStatus();
+  requestRender();
+}
+function setStatus(){
+  const n = state.normal ? "diffuse+normal" : "仅 diffuse（法线按全平面处理）";
+  $("status").textContent = "WebGL2 · " + state.w + "×" + state.h + " · " + n;
+  $("status").classList.remove("err");
+}
+function loadFile(file, which){
+  const img = new Image();
+  img.onload = () => (which === "diffuse" ? setDiffuse : setNormal)(img, file.name);
+  img.onerror = () => fatal("图片解码失败：" + file.name);
+  img.src = URL.createObjectURL(file);
+}
+function bindSlot(slotId, fileId, which){
+  const slot = $(slotId), input = $(fileId);
+  slot.addEventListener("click", () => input.click());
+  input.addEventListener("change", () => { if (input.files[0]) loadFile(input.files[0], which); input.value = ""; });
+  slot.addEventListener("dragover", e => { e.preventDefault(); slot.classList.add("hover"); });
+  slot.addEventListener("dragleave", () => slot.classList.remove("hover"));
+  slot.addEventListener("drop", e => {
+    e.preventDefault(); slot.classList.remove("hover");
+    const f = [...e.dataTransfer.files].find(f => f.type.startsWith("image/"));
+    if (f) loadFile(f, which);
+  });
+}
+bindSlot("slotDiffuse", "fileDiffuse", "diffuse");
+bindSlot("slotNormal", "fileNormal", "normal");
+$("btnClear").addEventListener("click", () => {
+  state.diffuse = null; state.normal = null; state.lightSeen = false;
+  clearSlot("slotDiffuse", "拖入 / 点击选择 PNG");
+  clearSlot("slotNormal", "拖入 / 点击选择 PNG");
+  refresh();
+});
+
+/* ═══ 光源交互：移动＝移光，滚轮＝光高 ═══ */
+canvas.addEventListener("mousemove", e => {
+  const r = canvas.getBoundingClientRect();
+  state.lightX = Math.min(Math.max((e.clientX - r.left)/state.zoom, 0), state.w - 1);
+  state.lightY = Math.min(Math.max((e.clientY - r.top)/state.zoom, 0), state.h - 1);
+  requestRender();
+});
+canvas.addEventListener("wheel", e => {
+  e.preventDefault();
+  const s = $("lightZ");
+  s.value = Math.min(Math.max(+s.value - Math.sign(e.deltaY)*5, +s.min), +s.max);
+  $("lightZv").textContent = s.value;
+  requestRender();
+}, { passive:false });
+
+/* 参数控件 → 数值显示 + 重绘 */
+for (const id of ["lightZ","intensity","ambient","spec","shininess"]) {
+  $(id).addEventListener("input", () => { $("" + id + "v").textContent = (+$(id).value).toFixed(id === "shininess" || id === "lightZ" ? 0 : 2); requestRender(); });
+}
+for (const id of ["mode","zoom","quant","invertY"])
+  $(id).addEventListener("change", () => { state.zoom = +$("zoom").value; requestRender(); });
+
+/* ═══ 示例素材：程序生成（高度场 → Sobel → 法线，路线 B 管线预演） ═══ */
+function makeSample(){
+  const W = 64, H = 64, CX = 32, CY = 40, RX = 21, RY = 17, DOME = 15;
+  const q2 = (x, y) => { const dx = (x-CX)/RX, dy = (y-CY)/RY; return dx*dx + dy*dy; };
+  const dome = (x, y) => { const t = 1 - q2(x, y); return t > 0 ? Math.sqrt(t) : 0; };
+  const bump = (x, y, bx, by, r, bh) => {
+    const dx = (x-bx)/r, dy = (y-by)/r, t = 1 - dx*dx - dy*dy;
+    return t > 0 ? bh*Math.sqrt(t) : 0;
+  };
+  // 高度场：身体圆顶 + 双眼凸起 + 左上高光凸起
+  const h = new Float32Array(W*H), mask = new Uint8Array(W*H);
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+    const i = y*W + x;
+    if (q2(x, y) <= 1) {
+      mask[i] = 1;
+      h[i] = DOME*dome(x, y) + bump(x, y, 25, 33, 4.2, 3.2) + bump(x, y, 39, 33, 4.2, 3.2) + bump(x, y, 19, 26, 3.5, 3.0);
+    }
+  }
+  // 高度 → 法线：Sobel 3×3（clamp 边界）。标准 OpenGL 约定（y 向上）：R=−∂h/∂col（=+gx）、G=+∂h/∂row_down（=−gy）
+  const SOBEL_S = 1.6;
+  const Hh = (x, y) => h[Math.min(Math.max(y,0),H-1)*W + Math.min(Math.max(x,0),W-1)];
+  const normal = document.createElement("canvas"); normal.width = W; normal.height = H;
+  const height = document.createElement("canvas"); height.width = W; height.height = H;
+  const nc = normal.getContext("2d"), hc = height.getContext("2d");
+  const nImg = nc.createImageData(W, H), hImg = hc.createImageData(W, H);
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+    const i = y*W + x, o = i*4;
+    const gx = (Hh(x-1,y-1)+2*Hh(x-1,y)+Hh(x-1,y+1)) - (Hh(x+1,y-1)+2*Hh(x+1,y)+Hh(x+1,y+1));
+    const gy = (Hh(x-1,y-1)+2*Hh(x,y-1)+Hh(x+1,y-1)) - (Hh(x-1,y+1)+2*Hh(x,y+1)+Hh(x+1,y+1));
+    let nx = gx*SOBEL_S, ny = -gy*SOBEL_S, nz = 1;
+    const len = Math.hypot(nx, ny, nz); nx /= len; ny /= len; nz /= len;
+    nImg.data[o] = (nx*0.5+0.5)*255; nImg.data[o+1] = (ny*0.5+0.5)*255; nImg.data[o+2] = (nz*0.5+0.5)*255; nImg.data[o+3] = 255;
+    const hv = Math.min(h[i]/21, 1)*255;
+    hImg.data[o] = hImg.data[o+1] = hImg.data[o+2] = hv; hImg.data[o+3] = 255;
+  }
+  nc.putImageData(nImg, 0, 0); hc.putImageData(hImg, 0, 0);
+  // Diffuse：圆顶分档底色（刻意压淡，让光照负责明暗）+ 描边 + 眼嘴
+  const C = { out:"#17251a", base:"#58b14c", hi:"#7ac95f", lo:"#46963c", eye:"#f2f5f0", pupil:"#232f38", mouth:"#2e4a33" };
+  const diffuse = document.createElement("canvas"); diffuse.width = W; diffuse.height = H;
+  const dc = diffuse.getContext("2d");
+  const dImg = dc.createImageData(W, H);
+  const hex = s => [parseInt(s.slice(1,3),16), parseInt(s.slice(3,5),16), parseInt(s.slice(5,7),16)];
+  const pal = Object.fromEntries(Object.entries(C).map(([k, v]) => [k, hex(v)]));
+  const inEye = (x, y, ex, ey) => { const dx = x-ex, dy = (y-ey)/1.25; return dx*dx+dy*dy <= 3.4*3.4; };
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+    const i = y*W + x, o = i*4;
+    let c = null;
+    if (!mask[i]) { dImg.data[o+3] = 0; continue; }
+    const t = h[i]/DOME;
+    if (q2(x, y) > 0.83) c = pal.out;
+    else if ((y >= 44 && y <= 45) && x >= 29 && x <= 35 && (y === 44 ? (x === 29 || x === 35) : true)) c = pal.mouth;
+    else if (inEye(x, y, 25, 33) || inEye(x, y, 39, 33)) {
+      const pupil = (x >= 26 && x <= 27 && y >= 34 && y <= 36) || (x >= 37 && x <= 38 && y >= 34 && y <= 36);
+      c = pupil ? pal.pupil : pal.eye;
+    }
+    else if (h[i] < 3.5 && q2(x, y) > 0.30) c = pal.lo;
+    else if (t > 0.60) c = pal.hi;
+    else c = pal.base;
+    dImg.data[o] = c[0]; dImg.data[o+1] = c[1]; dImg.data[o+2] = c[2]; dImg.data[o+3] = 255;
+  }
+  dc.putImageData(dImg, 0, 0);
+  return { diffuse, normal, height };
+}
+$("btnSample").addEventListener("click", () => {
+  const s = makeSample();
+  setDiffuse(s.diffuse, "示例·史莱姆");
+  setNormal(s.normal, "示例·法线(Sobel)");
+});
+
+/* 启动：直接载入示例，立即可玩 */
+if (gl) $("btnSample").click();
+</script>
+</body>
+</html>

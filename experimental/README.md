@@ -6,4 +6,4 @@
 
 | 目录 | 内容 | 状态 |
 |---|---|---|
-| `pixel-normal/` | 像素法线实验室：diffuse × normal 实时光照查看 + 高度图 Sobel 转法线 | 调研完成，待实现 |
+| `pixel-normal/` | 像素法线实验室：diffuse × normal 实时光照查看 + 高度图 Sobel 转法线 | P0 光照查看器已实现；P1 内置转换参数面板待做 |
