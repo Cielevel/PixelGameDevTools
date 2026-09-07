@@ -115,7 +115,19 @@
       </select>
       <button class="mini" id="detectGrid" title="亮度梯度自相关检测逻辑像素格距（范围 2–128）">检测网格</button></div>
     <div class="row note" id="griddet">缩格采样默认众数（对 JPEG 色噪鲁棒）；「检测网格」自动估格距并填入缩格。</div>
-    <div class="row"><label><input type="checkbox" id="mbg" checked> 去背景（四角同色判定 + 边界连通清除；主体包住的同类色保留）</label></div>
+    <div class="row"><label><input type="checkbox" id="mbg" checked> 去背景</label>
+      <select id="bgmode" title="自动：四角同色判定 + 边界连通清除（对背景打光渐变/洞内背景无效）；绿幕：键色色度距离逐像素判定（只比色品不比明度）">
+        <option value="auto" selected>自动（四角+连通）</option>
+        <option value="chroma">绿幕抠图（键色色度）</option>
+      </select></div>
+    <div id="chromaCtl" hidden>
+      <div class="row"><button class="mini" id="pickKey">取键色</button>
+        <span class="sw" id="keySw" style="background:#00b140"></span><span id="keyHex" class="note">未设置（自动取四角）</span></div>
+      <div class="row">色度阈值 <input type="range" id="ckthr" min="0" max="120" value="28" style="width:110px"> <span id="ckthrv">28</span>
+        软过渡 <input type="range" id="cksoft" min="0" max="80" value="16" style="width:90px"> <span id="cksoftv">16</span></div>
+      <div class="row">去溢色 <input type="range" id="ckdespill" min="0" max="100" value="50" style="width:150px"> <span id="ckdespillv">50</span>%</div>
+      <div class="row note" id="ckhint">「取键色」后点击画面背景取色（读原图像素，缩格自动映射）。逐像素按 YCbCr 色度距离判 alpha：洞内/渐变绿幕全清，主体近似色不误伤；去溢色把贴近键色的边缘色度压回中性（明度不变）。色度与键色完全同品的主体色（如绿衣配绿幕）仍不可分——先看预览再定。</div>
+    </div>
     <div class="row"><label><input type="checkbox" id="malpha" checked> alpha 两态化（≥128→255，对齐工程门禁）</label></div>
     <div class="row">自动描边 <select id="omode">
       <option value="off" selected>关</option>
@@ -529,6 +541,43 @@ function removeBackground(id, tol = 16) {
   return { width: w, height: h, data: out };
 }
 
+/** 绿幕抠图（色度键控）：逐像素按 YCbCr 色度平面到键色 key=[r,g,b] 的距离判 alpha。
+ *  与自动去背景的互补差异：只比色品不比明度（主体上明暗不同的近似色不误伤）、
+ *  不依赖边界连通（洞内/缝隙背景、渐变打光的绿幕全量清除）。
+ *  thr = 全透明色度距离；soft = 软过渡带宽（thr~thr+soft 之间 alpha 线性渐变，
+ *  配合 alpha 两态化得到干净硬边）；despill 0..1 = 去溢色——键色主通道（G 幕压 G、
+ *  B 幕压 B、R 幕压 R，主通道须显著占优才启用）在贴近键色的边缘带内压回另两通道
+ *  的较大值（经典绿溢 G→max(R,B) 的推广；非键方向通道零改动）。
+ *  未触碰像素逐字节原样保留——色数统计零漂移。返回 {width,height,data}。 */
+function chromaKeyImageData(id, key, thr = 28, soft = 16, despill = 0.5) {
+  const w = id.width, h = id.height, src = id.data;
+  const cbOf = (r, g, b) => 128 - 0.168736 * r - 0.331264 * g + 0.5 * b;
+  const crOf = (r, g, b) => 128 + 0.5 * r - 0.418688 * g - 0.081312 * b;
+  const kcb = cbOf(key[0], key[1], key[2]), kcr = crOf(key[0], key[1], key[2]);
+  const band = Math.max(0, soft);
+  const reach = thr + band + 16;                        // 去溢色影响域：透明线外再延伸一程（保护中距离的合法近似绿）
+  const sorted = [key[0], key[1], key[2]].sort((a, b) => b - a);
+  const dom = sorted[0] - sorted[1] >= 30 ? key.indexOf(sorted[0]) : -1;   // 键色主通道（须显著占优）
+  const out = new Uint8ClampedArray(src);
+  for (let i = 0; i < src.length; i += 4) {
+    const r = src[i], g = src[i + 1], b = src[i + 2];
+    const d = Math.hypot(cbOf(r, g, b) - kcb, crOf(r, g, b) - kcr);
+    let a;
+    if (d <= thr) a = 0;
+    else if (band === 0 || d >= thr + band) a = 255;
+    else a = Math.round(255 * (d - thr) / band);
+    if (a === 0) { out[i + 3] = 0; continue; }
+    if (a !== src[i + 3]) out[i + 3] = a;
+    if (dom >= 0 && despill > 0 && d < reach) {
+      const wgt = (reach - d) / (reach - thr);          // 越贴近键色，溢色越重
+      const others = dom === 1 ? Math.max(r, b) : dom === 2 ? Math.max(r, g) : Math.max(g, b);
+      const v = src[i + dom];
+      if (v > others) out[i + dom] = Math.round(v - despill * wgt * (v - others));
+    }
+  }
+  return { width: w, height: h, data: out };
+}
+
 /** 标准像素画描边（1px、#000000、4 连通）：
  *  'inner' 转换 = 不透明（alpha≥128）像素邻接透明/画布外 → 该像素转黑；
  *  'outer' 附加 = 透明像素邻接不透明 → 补黑（画布内裁剪，不扩画布）。
@@ -575,6 +624,8 @@ function init() {
   let comp = null;             // 显示合成 {canvas,id} = proc/原始帧 + 自动描边（笔迹在绘制时叠加）
   let omode = 'off';           // 自动描边：off | outer | inner
   let brushOn = false;         // 描边笔刷显示开关
+  let pickingKey = false;      // 绿幕取键色模式（一次性：点击画面取色后自动退出）
+  let keyColor = null;         // 绿幕键色 hex；null = 首次进入绿幕模式时自动取四角
   const strokes = new Map();   // 笔迹层 key = y*65536+x（换素材/帧/缩格才清空）
 
   // ── 设置项（localStorage 持久化）──
@@ -587,6 +638,16 @@ function init() {
     set threshold(v) { localStorage.setItem('ai_threshold', v); },
     get gstep() { const v = +localStorage.getItem('ai_gstep'); return v >= 1 ? v : 8; },
     set gstep(v) { localStorage.setItem('ai_gstep', v); },
+    get bgmode() { return localStorage.getItem('ai_bgmode') || 'auto'; },
+    set bgmode(v) { localStorage.setItem('ai_bgmode', v); },
+    get ckkey() { return localStorage.getItem('ai_ckkey') || ''; },
+    set ckkey(v) { localStorage.setItem('ai_ckkey', v); },
+    get ckthr() { const v = +localStorage.getItem('ai_ckthr'); return v >= 0 ? (localStorage.getItem('ai_ckthr') === null ? 28 : v) : 28; },
+    set ckthr(v) { localStorage.setItem('ai_ckthr', v); },
+    get cksoft() { const v = +localStorage.getItem('ai_cksoft'); return localStorage.getItem('ai_cksoft') === null ? 16 : v; },
+    set cksoft(v) { localStorage.setItem('ai_cksoft', v); },
+    get ckdespill() { const v = +localStorage.getItem('ai_ckdespill'); return localStorage.getItem('ai_ckdespill') === null ? 50 : v; },
+    set ckdespill(v) { localStorage.setItem('ai_ckdespill', v); },
   };
   let tiers = store.tiers;
 
@@ -924,7 +985,7 @@ function init() {
   }
   cv.addEventListener('mousedown', ev => {
     if (!comp) return;
-    if (brushOn && ev.button === 0) { painting = true; erasing = ev.altKey; paintAt(ev); }
+    if (brushOn && !pickingKey && ev.button === 0) { painting = true; erasing = ev.altKey; paintAt(ev); }
     else if (ev.button === 2) { panning = true; lastXY = { x: ev.clientX, y: ev.clientY }; }
     else if (ev.button === 0) { dragging = true; lastXY = { x: ev.clientX, y: ev.clientY }; }
     ev.preventDefault();
@@ -951,6 +1012,17 @@ function init() {
   addEventListener('mouseup', () => { dragging = false; lastXY = null; painting = false; erasing = false; panning = false; });
   cv.addEventListener('contextmenu', ev => ev.preventDefault());
   cv.addEventListener('click', ev => {
+    if (pickingKey) {          // 绿幕取键色：优先于拾色/笔刷，读原图像素
+      const p = srcPixel(ev); if (!p) return;
+      const c = originalPixelAt(p);
+      if (!c) { setStatus('键色取色超出原图范围', true); return; }
+      keyColor = hex6((c[0] << 16) | (c[1] << 8) | c[2]);
+      store.ckkey = keyColor;
+      renderKey(); setPicking(false);
+      setStatus('键色 = ' + keyColor + '（已按色度距离重抠）');
+      updateProc();
+      return;
+    }
     if (brushOn) return;   // 笔刷模式下点击 = 涂黑，不拾色
     const p = srcPixel(ev); if (!p || !lastAnalysis) return;
     const dd = displayData(), dm = displayDims();
@@ -1051,14 +1123,18 @@ function init() {
     } else {
       id = it.curId || frameToImageData(it.cur);
     }
-    if ($('mbg').checked) id = removeBackground(id, 16);
+    if ($('mbg').checked) {
+      if ($('bgmode').value === 'chroma') {
+        id = chromaKeyImageData(id, keyRgb(), +$('ckthr').value, +$('cksoft').value, +$('ckdespill').value / 100);
+      } else id = removeBackground(id, 16);
+    }
     id = mergeImageData(id, thr, abin, space);
     if (kq > 0) id = quantizeImageData(id, kq);
     const canvas = document.createElement('canvas');
     canvas.width = id.width; canvas.height = id.height;
     canvas.getContext('2d').putImageData(new ImageData(id.data, id.width, id.height), 0, 0);
     const prev = proc;
-    proc = { canvas, id, analysis: analyzeImageData(id), threshold: thr, denom, sampling, space, kq, bg: $('mbg').checked };
+    proc = { canvas, id, analysis: analyzeImageData(id), threshold: thr, denom, sampling, space, kq, bg: $('mbg').checked, bgMode: $('bgmode').value, ckthr: +$('ckthr').value };
     if (prev && prev.denom !== denom) strokes.clear();   // 坐标空间变了，笔迹作废
     rebuildComp();
     renderMergePanel(proc.analysis);
@@ -1079,7 +1155,7 @@ function init() {
     const chain = [];
     if (proc.denom > 1) chain.push('1/' + proc.denom + ' 缩格·' + { mode: '众数', median: '中位数', nearest: '最近邻' }[proc.sampling] +
       (gridOrigin.x || gridOrigin.y ? '（相位 ' + gridOrigin.x + ',' + gridOrigin.y + '）' : ''));
-    if (proc.bg) chain.push('去背景');
+    if (proc.bg) chain.push(proc.bgMode === 'chroma' ? '绿幕抠图（阈值 ' + proc.ckthr + '）' : '去背景');
     if (proc.threshold > 0) chain.push('合并 ' + proc.threshold + (proc.space === 'oklab' ? '（OKLab）' : '（RGB）'));
     if (proc.kq > 0) chain.push('量化 ' + proc.kq + ' 色（OKLab）');
     sum.innerHTML = '<p class="kv">处理后色数：<b>' + a.colors.length + '</b>（原 ' + orig + '）　尺寸：' + a.w + '×' + a.h +
@@ -1117,6 +1193,7 @@ function init() {
       base += '_q' + proc.threshold;
       if (proc.denom > 1) base += '_d' + proc.denom + ({ mode: 'm', median: 'med', nearest: '' }[proc.sampling] || '');
       if (proc.kq > 0) base += '_c' + proc.kq;
+      if (proc.bg && proc.bgMode === 'chroma') base += '_gk' + proc.ckthr;
     }
     if (omode !== 'off') base += '_ol';
     if (brushOn && strokes.size) base += '_br';
@@ -1193,6 +1270,63 @@ function init() {
   $('gstep').onchange = e => { store.gstep = Math.max(1, Math.round(+e.target.value) || 8); e.target.value = store.gstep; drawCurrent(files[cur]); };
   $('gstep').value = store.gstep;
 
+  // ── 绿幕抠图：键色与参数 ──
+  function updateChromaVis() { $('chromaCtl').hidden = $('bgmode').value !== 'chroma'; }
+  function renderKey() {
+    $('keySw').style.background = keyColor || '#666';
+    $('keyHex').textContent = keyColor ? keyColor + '（可重新取色）' : '未设置（自动取四角）';
+  }
+  function autoKey() {          // 与自动去背景同起手：左上 2×2 均值
+    const it = files[cur];
+    if (it && it.curId) {
+      const w = it.curId.width, d = it.curId.data;
+      let r = 0, g = 0, b = 0, n = 0;
+      for (let y = 0; y < Math.min(2, it.curId.height); y++) for (let x = 0; x < Math.min(2, w); x++) {
+        const i = (y * w + x) * 4; r += d[i]; g += d[i + 1]; b += d[i + 2]; n++;
+      }
+      keyColor = hex6(((Math.round(r / n) << 16) | (Math.round(g / n) << 8) | Math.round(b / n)) >>> 0);
+    } else keyColor = '#00b140';
+    store.ckkey = keyColor; renderKey();
+  }
+  function keyRgb() {
+    if (!keyColor) autoKey();
+    const n = parseInt((keyColor || '#00b140').slice(1), 16);
+    return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+  }
+  function setPicking(on) {
+    pickingKey = on;
+    $('pickKey').textContent = on ? '取键色中…（Esc 取消）' : '取键色';
+    if (on) setStatus('取键色：点击画面上的背景（读原图像素，缩格自动映射）');
+  }
+  function originalPixelAt(p) {   // 显示坐标 → 原图坐标（缩格/相位映射）
+    const it = files[cur]; if (!it) return null;
+    const id = it.curId || frameToImageData(it.cur);
+    let x = p.x, y = p.y;
+    if (proc && proc.denom > 1) { x = gridOrigin.x + p.x * proc.denom; y = gridOrigin.y + p.y * proc.denom; }
+    if (x < 0 || y < 0 || x >= id.width || y >= id.height) return null;
+    const i = (y * id.width + x) * 4;
+    return [id.data[i], id.data[i + 1], id.data[i + 2]];
+  }
+  $('bgmode').onchange = () => {
+    store.bgmode = $('bgmode').value; updateChromaVis();
+    if ($('bgmode').value === 'chroma' && !keyColor) autoKey();
+    updateProc();
+  };
+  $('ckthr').oninput = e => { $('ckthrv').textContent = e.target.value; store.ckthr = +e.target.value; scheduleProc(); };
+  $('cksoft').oninput = e => { $('cksoftv').textContent = e.target.value; store.cksoft = +e.target.value; scheduleProc(); };
+  $('ckdespill').oninput = e => { $('ckdespillv').textContent = e.target.value; store.ckdespill = +e.target.value; scheduleProc(); };
+  $('ckthr').onchange = updateProc;          // 松开滑杆必重算一次（rAF 节流之外兜底）
+  $('cksoft').onchange = updateProc;
+  $('ckdespill').onchange = updateProc;
+  $('pickKey').onclick = () => setPicking(!pickingKey);
+  // 初始化（localStorage 持久化）
+  $('bgmode').value = store.bgmode;
+  $('ckthr').value = store.ckthr; $('ckthrv').textContent = $('ckthr').value;
+  $('cksoft').value = store.cksoft; $('cksoftv').textContent = $('cksoft').value;
+  $('ckdespill').value = store.ckdespill; $('ckdespillv').textContent = $('ckdespill').value;
+  keyColor = store.ckkey || null;
+  renderKey(); updateChromaVis();
+
   // ── 工具条事件 ──
   $('plus').onclick = () => setZoom(zoom + 1);
   $('minus').onclick = () => setZoom(zoom - 1);
@@ -1218,6 +1352,7 @@ function init() {
 
   // 键盘
   addEventListener('keydown', e => {
+    if (e.key === 'Escape' && pickingKey) { setPicking(false); setStatus('已取消取键色'); return; }
     const it = files[cur]; if (!it) return;
     if (e.key === '+' || e.key === '=') setZoom(zoom + 1);
     if (e.key === '-') setZoom(zoom - 1);
@@ -1240,7 +1375,7 @@ function init() {
 const escapeHtml = s => String(s).replace(/[&<>"]/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[ch]));
 
 if (typeof document !== 'undefined' && document.getElementById('cv')) init();
-if (typeof module !== 'undefined' && module.exports) module.exports = { analyzeImageData, checkTiers, checkTile, checkScaleFit, verdict, hex6, mergeImageData, applyOutline, rgbToOklab, oklabDist2, detectGridImageData, downscaleImageData, quantizeImageData, removeBackground };
+if (typeof module !== 'undefined' && module.exports) module.exports = { analyzeImageData, checkTiers, checkTile, checkScaleFit, verdict, hex6, mergeImageData, applyOutline, rgbToOklab, oklabDist2, detectGridImageData, downscaleImageData, quantizeImageData, removeBackground, chromaKeyImageData };
 </script>
 </body>
 </html>
