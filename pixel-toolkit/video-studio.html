@@ -56,7 +56,7 @@ header h1::before {   /* 品牌色标：薰衣草方块 */
 header .sub { color:var(--sub); font-size:12px; min-width:0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 #status {   /* 状态胶囊（status-badge）：JS 会内联覆盖 color（--warn=异常 / --sub=常规） */
   flex:none; max-width:440px; font-size:12px; color:var(--sub);
-  font-family:ui-monospace,"Cascadia Mono","JetBrains Mono",Consolas,monospace;
+  font-variant-numeric:tabular-nums;   /* 含中文，不用 mono 栈（CJK 回退会混排不齐） */
   background:var(--panel-2); border:1px solid var(--edge); border-radius:999px; padding:3px 12px;
   white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
 }
@@ -78,10 +78,23 @@ fieldset {
 }
 legend { font-size:12px; font-weight:500; color:var(--sub); letter-spacing:.4px; padding:0 8px; }
 
-/* ── 表单行与输入控件（text-input：canvas 内嵌底 + hairline，焦点环 2px lavender@50%） ── */
-.row { display:flex; gap:6px; align-items:center; margin:7px 0; flex-wrap:wrap; }
+/* ── 表单行与输入控件（text-input：canvas 内嵌底 + hairline，焦点环 2px lavender@50%）
+   行结构约定：控件一行（label 固定列宽 60px 对齐），说明文字一律 .hint 独立成行，
+   不与控件同行抢宽 → 窄栏（内容宽 ~266px）下不再出现随机折行 ── */
+.row { display:flex; gap:6px; align-items:center; margin:7px 0; }
+.row > label:first-child { flex:none; width:60px; }
+.row.sub { padding-left:66px; }   /* 缩进对齐到 label 之后的控件区 */
 label { color:var(--sub); }
-.note, .legend { color:var(--sub); font-size:12px; }
+.unit { color:var(--sub); }
+.note { color:var(--sub); font-size:12px; }
+.hint { color:var(--dim); font-size:12px; line-height:1.55; margin-top:3px; word-break:keep-all; overflow-wrap:break-word; }
+.hint + .hint { margin-top:0; }
+.field { margin:9px 0; }
+.field .row { margin:0; }
+.field .row.sub { margin-top:6px; }
+.pad { width:28px; padding:3px 0; text-align:center; }
+#ow,#oh,#cw,#ch { width:64px; }
+#dx,#dy { width:52px; }
 input[type=text],input[type=number],select {
   background:var(--bg); border:1px solid var(--edge); color:var(--txt);
   border-radius:8px; padding:4px 8px; font:inherit;
@@ -138,7 +151,7 @@ button.mini { padding:3px 9px; font-size:12px; border-radius:6px; }
 #vstage img,#vstage canvas { display:block; background:repeating-conic-gradient(#141516 0 25%, #0d0e10 0 50%) 0 0/24px 24px; border-radius:2px; }
 #vmeta {
   margin-top:10px; color:var(--sub); font-size:12px; white-space:pre;
-  font-family:ui-monospace,"Cascadia Mono","JetBrains Mono",Consolas,monospace;
+  font-variant-numeric:tabular-nums;   /* 文件名+中文混排，不用 mono 栈 */
   background:var(--bg); border:1px solid var(--edge); border-radius:8px; padding:7px 10px;
 }
 #vmeta:empty { display:none; }
@@ -157,6 +170,16 @@ button.mini { padding:3px 9px; font-size:12px; border-radius:6px; }
 #timeline canvas { border-radius:8px; }
 .seg { color:var(--warn); font-weight:600; }
 
+/* ── 区间卡片（两行式：时间行 + 动作行，✕ 靠右；替代易折行的单行布局） ── */
+.range { border:1px solid var(--edge); border-radius:8px; padding:6px 8px; margin:0 0 6px; background:var(--panel-2); }
+.range .row { margin:0; }
+.range .row + .row { margin-top:5px; }
+.range .rdel { margin-left:auto; }
+
+/* ── 中栏标题行：眉题 + 旁注 ── */
+.stage-head { display:flex; align-items:baseline; gap:10px; margin:2px 0 10px; }
+.stage-head h2 { margin:0; }
+
 /* ── 右栏：导出方案 / 帧统计（changelog-row 式发丝行线）/ 导出按钮 ── */
 .exp-bar { display:flex; gap:6px; flex-wrap:wrap; margin:6px 0; }
 .exp-bar button { flex:1 1 calc(50% - 3px); }
@@ -167,7 +190,6 @@ th,td { padding:3px 6px; text-align:left; }
 #fstats td:first-child { color:var(--sub); }
 #fstats td:last-child {
   text-align:right; color:var(--ink); font-variant-numeric:tabular-nums;
-  font-family:ui-monospace,"Cascadia Mono","JetBrains Mono",Consolas,monospace;
 }
 </style>
 </head>
@@ -185,35 +207,57 @@ th,td { padding:3px 6px; text-align:left; }
     <input type="file" id="file" accept="video/*" hidden>
     <div id="vmeta"></div>
 
-    <fieldset><legend>① 裁剪区间（可多个，拍完一段接下一段）</legend>
+    <fieldset><legend>① 裁剪区间</legend>
+      <div class="hint">可添加多段，拍完一段接下一段；区间不重叠，播放顺序=列表顺序</div>
       <div id="ranges"></div>
-      <div class="row"><button id="addRange" class="mini">＋ 添加区间</button><span class="note">不重叠；播放顺序 = 列表顺序</span></div>
+      <div class="row"><button id="addRange" class="mini">+ 添加区间</button></div>
     </fieldset>
 
     <fieldset><legend>② 采样帧率</legend>
-      <div class="row"><input type="number" id="fps" step="0.1" min="1" value="24"><label>帧/秒（从区间均匀采样）</label></div>
-      <div class="row">
+      <div class="row"><label>帧率</label><input type="number" id="fps" step="0.1" min="1" value="24"><span class="unit">帧/秒</span></div>
+      <div class="row sub">
         <button class="mini" data-fps="12">12</button>
         <button class="mini" data-fps="24">24</button>
         <button class="mini" data-fps="30">30</button>
         <button class="mini" data-fps="60">60</button>
-        <span class="note">源 24fps 时：24=全帧，12=减半</span>
       </div>
+      <div class="hint">从区间均匀采样</div>
+      <div class="hint">源 24fps 时：24=全帧、12=减半</div>
     </fieldset>
 
     <fieldset><legend>③ 标准化参数</legend>
-      <div class="row"><label>主体尺寸</label><input type="number" id="ow" min="1" value="64"><label>×</label><input type="number" id="oh" min="1" value="64"><label>px</label><span class="note">等比缩放主体到该尺寸</span></div>
-      <div class="row"><label>输出画布</label><input type="number" id="cw" min="1" value="64"><label>×</label><input type="number" id="ch" min="1" value="64"><label>px</label><span class="note">不改主体大小，调画布大小即调占比</span></div>
-      <div class="row"><label>等比保形</label><input type="checkbox" id="fit" checked><span class="note">contain（居中留边）</span></div>
-      <div class="row"><label>主体位置</label>
-        <button class="mini" id="mvL">←</button><button class="mini" id="mvU">↑</button><button class="mini" id="mvD">↓</button><button class="mini" id="mvR">→</button>
-        <input type="number" id="dx" min="-99" max="99" value="0" style="width:48px"><input type="number" id="dy" min="-99" max="99" value="0" style="width:48px">
-        <button class="mini" id="mvReset">复位</button>
+      <div class="field">
+        <div class="row"><label>主体尺寸</label><input type="number" id="ow" min="1" value="64"><span class="unit">×</span><input type="number" id="oh" min="1" value="64"><span class="unit">px</span></div>
+        <div class="hint">等比缩放主体到该尺寸</div>
       </div>
-      <div class="row"><label>目标色数</label><input type="number" id="colors" min="0" max="64" value="16"><span class="note">0=不量化</span></div>
-      <div class="row"><label>1px 描边</label><input type="color" id="outlineColor" value="#000000"><input type="checkbox" id="outline" checked></div>
-      <div class="row"><label>绿幕抠像</label>
-        <select id="key"><option value="auto">auto（检测绿幕）</option><option value="none">none</option><option value="green">强制绿幕</option></select>
+      <div class="field">
+        <div class="row"><label>输出画布</label><input type="number" id="cw" min="1" value="64"><span class="unit">×</span><input type="number" id="ch" min="1" value="64"><span class="unit">px</span></div>
+        <div class="hint">不改主体大小，调画布大小即调占比</div>
+      </div>
+      <div class="field">
+        <div class="row"><label>等比保形</label><input type="checkbox" id="fit" checked><span class="unit">contain（居中留边）</span></div>
+      </div>
+      <div class="field">
+        <div class="row"><label>主体位置</label><span class="unit">X</span><input type="number" id="dx" min="-99" max="99" value="0"><span class="unit">Y</span><input type="number" id="dy" min="-99" max="99" value="0"></div>
+        <div class="row sub">
+          <button class="mini pad" id="mvL" title="左移 1px">←</button>
+          <button class="mini pad" id="mvU" title="上移 1px">↑</button>
+          <button class="mini pad" id="mvD" title="下移 1px">↓</button>
+          <button class="mini pad" id="mvR" title="右移 1px">→</button>
+          <button class="mini" id="mvReset">复位</button>
+        </div>
+        <div class="hint">X 正=右移、Y 正=下移；箭头每点 1px</div>
+      </div>
+      <div class="field">
+        <div class="row"><label>目标色数</label><input type="number" id="colors" min="0" max="64" value="16"><span class="unit">0=不量化</span></div>
+      </div>
+      <div class="field">
+        <div class="row"><label>1px 描边</label><input type="checkbox" id="outline" checked><span class="unit">启用</span><input type="color" id="outlineColor" value="#000000"></div>
+      </div>
+      <div class="field">
+        <div class="row"><label>绿幕抠像</label>
+          <select id="key"><option value="auto">auto（检测绿幕）</option><option value="none">none</option><option value="green">强制绿幕</option></select>
+        </div>
       </div>
     </fieldset>
 
@@ -221,7 +265,7 @@ th,td { padding:3px 6px; text-align:left; }
 
   <!-- 中：预览 -->
   <section id="center">
-    <h2>预览（参数修改即重处理）</h2>
+    <div class="stage-head"><h2>预览</h2><span class="note">参数修改即自动重处理</span></div>
     <div id="vstage"><img id="prev" style="max-width:100%;max-height:46vh"></div>
     <div id="previewbar">
       <button id="pbtn" class="primary">▶ 处理</button>
@@ -234,19 +278,22 @@ th,td { padding:3px 6px; text-align:left; }
 
   <!-- 右：导出方案 + 统计 -->
   <section id="right">
-    <fieldset><legend>④ 导出方案（可多选，导出后点每项下载）</legend>
+    <fieldset><legend>④ 导出方案</legend>
+      <div class="hint">可多选；处理完成后点每项下载</div>
       <div class="row"><input type="checkbox" id="expHtml" checked><label>HTML 播放器</label></div>
       <div class="row"><input type="checkbox" id="expGif" checked><label>GIF</label></div>
       <div class="row"><input type="checkbox" id="expSheet" checked><label>Sprite Sheet（横向）</label></div>
       <div class="row"><input type="checkbox" id="expPngs" checked><label>PNG 帧序列</label></div>
       <div class="row"><button id="dlZip" class="mini">导出 ZIP（帧 PNG 打包）</button></div>
     </fieldset>
-    <h2>帧统计</h2>
-    <table id="fstats"></table>
-    <div class="legend">按 pixcli check 口径：尺寸 / alpha 两态 / 色数 ≤16 / 连通域 / 孤立像素提示（P2）</div>
-    <h2 style="margin-top:16px">导出（已处理帧）</h2>
-    <div class="exp-bar" id="exports"></div>
-    <div class="note" id="expNote">点「▶ 处理」后在此生成导出项。</div>
+    <fieldset><legend>帧统计</legend>
+      <table id="fstats"></table>
+      <div class="hint">校验口径（pixcli check）：尺寸 / alpha 两态 / 色数 ≤16 / 连通域 / 孤立像素提示（P2）</div>
+    </fieldset>
+    <fieldset><legend>导出</legend>
+      <div class="exp-bar" id="exports"></div>
+      <div class="hint" id="expNote">点「▶ 处理」后在此生成导出项。</div>
+    </fieldset>
   </section>
 </main>
 <script>
@@ -473,19 +520,20 @@ function loadVideoFile(file) {
   v.onerror = () => setStatus('视频解码失败（编码/容器不支持；MOV 建议转 MP4，用 Chrome/Edge）', true);
 }
 
-/* --- 区间列表渲染 --- */
+/* --- 区间列表渲染（两行卡片：时间行 + 动作行，避免窄栏单行折行） --- */
 function renderRanges() {
   const box = $('ranges'); box.innerHTML = '';
   V.ranges.forEach((r, idx) => {
     const row = document.createElement('div');
-    row.className = 'range row';
-    row.style.border = '1px solid var(--edge)'; row.style.borderRadius='4px'; row.style.padding='4px'; row.style.marginBottom='4px';
-    row.innerHTML = `<span class="note">#${idx+1}</span>
+    row.className = 'range';
+    row.innerHTML = `<div class="row"><span class="note">#${idx+1}</span>
       <input type="number" class="r0" step="0.1" min="0" value="${r.t0.toFixed(2)}" style="width:64px">
-      ~ <input type="number" class="r1" step="0.1" min="0" value="${r.t1.toFixed(2)}" style="width:64px"> s
-      <button class="mini rset0" title="把当前预览位置设为该区间起点">◉起</button>
-      <button class="mini rset1" title="把当前预览位置设为该区间终点">◉止</button>
-      <button class="mini rdel" title="删除该区间">✕</button>`;
+      <span class="unit">~</span>
+      <input type="number" class="r1" step="0.1" min="0" value="${r.t1.toFixed(2)}" style="width:64px">
+      <span class="unit">s</span>
+      <button class="mini rdel" title="删除该区间"${V.ranges.length <= 1 ? ' disabled' : ''}>✕</button></div>
+      <div class="row"><button class="mini rset0" title="把当前预览位置设为该区间起点">◉ 设为起点</button>
+      <button class="mini rset1" title="把当前预览位置设为该区间终点">◉ 设为终点</button></div>`;
     row.querySelector('.r0').oninput = () => { if (V.video) traceRange(); };
     row.querySelector('.r1').oninput = () => { if (V.video) traceRange(); };
     row.querySelector('.rset0').onclick = () => { row.querySelector('.r0').value = (V.video.currentTime||0).toFixed(2); traceRange(); };
