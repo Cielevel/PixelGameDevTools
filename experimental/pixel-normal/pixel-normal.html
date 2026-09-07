@@ -108,6 +108,12 @@ button.mini { padding:3px 9px; font-size:12px; border-radius:6px; }
 .slot .sfile { color:var(--dim); font-size:12px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:210px; }
 .slot input[type=file] { display:none; }
 
+/* ── 高度图 → 法线 转换卡：预览图 + 侧列 ── */
+.convrow { display:flex; gap:10px; align-items:flex-start; margin-top:8px; }
+#convPrev { flex:none; width:96px; height:96px; border-radius:6px; background:var(--panel-2); image-rendering:pixelated; }
+.convside { flex:1; min-width:0; }
+.convside .btnbar { margin:0 0 4px; }
+
 /* ── 预览舞台 ── */
 .stage-head { display:flex; align-items:baseline; gap:10px; margin:2px 0 10px; }
 .stage-head h2 { margin:0; }
@@ -150,11 +156,47 @@ button.mini { padding:3px 9px; font-size:12px; border-radius:6px; }
         </div>
         <input type="file" id="fileNormal" accept="image/*">
       </div>
+      <div class="slot" id="slotHeight">
+        <canvas id="thHeight" width="44" height="44"></canvas>
+        <div class="sinfo">
+          <div class="sname">Height（高度图·可选）</div>
+          <div class="sfile">拖入 / 点击选择 PNG</div>
+        </div>
+        <input type="file" id="fileHeight" accept="image/*">
+      </div>
       <div class="btnbar">
         <button id="btnSample" class="primary mini">载入示例素材</button>
         <button id="btnClear" class="mini">清空</button>
       </div>
-      <div class="hint">示例素材为程序生成：史莱姆高度场 → Sobel → 法线（路线 B 管线预演）。</div>
+      <div class="hint">示例素材为程序生成：史莱姆高度场经「高度图 → 法线」管线实时转换（路线 B 预演）。</div>
+    </fieldset>
+
+    <fieldset aria-label="高度图转法线"><div class="cap">高度图 → 法线</div>
+      <div class="row"><label>算子</label>
+        <select id="convOp" style="flex:1">
+          <option value="sobel3" selected>Sobel 3×3</option>
+          <option value="scharr3">Scharr 3×3</option>
+          <option value="central">中心差分</option>
+        </select>
+      </div>
+      <div class="row"><label>强度</label><input type="range" id="convStrength" min="0.05" max="5" step="0.05" value="1.5"><span class="val" id="convStrengthv">1.50</span></div>
+      <div class="row"><label>平滑</label><input type="range" id="convBlur" min="0" max="10" step="1" value="0"><span class="val" id="convBlurv">0</span></div>
+      <div class="row"><label>边界</label>
+        <select id="convEdge" style="flex:1">
+          <option value="clamp" selected>clamp（非平铺）</option>
+          <option value="wrap">wrap（可平铺）</option>
+        </select>
+      </div>
+      <div class="row"><label>反相</label><input type="checkbox" id="convInvert"><span class="hint" style="margin:0">黑=高 时勾选；彩色图按亮度取灰</span></div>
+      <div class="convrow">
+        <canvas id="convPrev" width="96" height="96"></canvas>
+        <div class="convside">
+          <div class="btnbar"><button id="btnApply" class="mini primary">送入 Normal 槽</button></div>
+          <div class="row"><label style="width:auto; flex:none">实时送入</label><input type="checkbox" id="convLive" checked></div>
+          <div class="hint" id="convInfo">先在素材区拖入高度图</div>
+        </div>
+      </div>
+      <div class="hint">亮度 → 梯度 → 法线；算子已归一化，强度＝梯度倍率（经验值 0.5～2）。平滑先把台阶变连续坡，抑制硬边锯齿。</div>
     </fieldset>
 
     <fieldset aria-label="视图"><div class="cap">视图</div>
@@ -321,7 +363,7 @@ function uploadTex(t, src){
 
 /* ═══ 状态 ═══ */
 const state = {
-  diffuse:null, normal:null,          // Image/Canvas
+  diffuse:null, normal:null, height:null,   // Image/Canvas
   w:0, h:0, zoom:6,
   lightX:0, lightY:0,                 // 素材像素，y 向下（鼠标坐标）
   lightSeen:false,
@@ -378,6 +420,12 @@ function setNormal(img, name){
   markSlot("slotNormal", name, img.width + "×" + img.height);
   refresh();
 }
+function setHeight(img, name){
+  state.height = img;
+  drawThumb($("thHeight"), img);
+  markSlot("slotHeight", name, img.width + "×" + img.height);
+  scheduleConvert();
+}
 function markSlot(id, name, dim){
   const el = $(id);
   el.classList.add("filled");
@@ -404,7 +452,7 @@ function setStatus(){
 }
 function loadFile(file, which){
   const img = new Image();
-  img.onload = () => (which === "diffuse" ? setDiffuse : setNormal)(img, file.name);
+  img.onload = () => ({ diffuse:setDiffuse, normal:setNormal, height:setHeight }[which])(img, file.name);
   img.onerror = () => fatal("图片解码失败：" + file.name);
   img.src = URL.createObjectURL(file);
 }
@@ -422,11 +470,14 @@ function bindSlot(slotId, fileId, which){
 }
 bindSlot("slotDiffuse", "fileDiffuse", "diffuse");
 bindSlot("slotNormal", "fileNormal", "normal");
+bindSlot("slotHeight", "fileHeight", "height");
 $("btnClear").addEventListener("click", () => {
-  state.diffuse = null; state.normal = null; state.lightSeen = false;
+  state.diffuse = null; state.normal = null; state.height = null; state.lightSeen = false;
   clearSlot("slotDiffuse", "拖入 / 点击选择 PNG");
   clearSlot("slotNormal", "拖入 / 点击选择 PNG");
+  clearSlot("slotHeight", "拖入 / 点击选择 PNG");
   refresh();
+  scheduleConvert();
 });
 
 /* ═══ 光源交互：移动＝移光，滚轮＝光高 ═══ */
@@ -469,24 +520,15 @@ function makeSample(){
       h[i] = DOME*dome(x, y) + bump(x, y, 25, 33, 4.2, 3.2) + bump(x, y, 39, 33, 4.2, 3.2) + bump(x, y, 19, 26, 3.5, 3.0);
     }
   }
-  // 高度 → 法线：Sobel 3×3（clamp 边界）。标准 OpenGL 约定（y 向上）：R=−∂h/∂col（=+gx）、G=+∂h/∂row_down（=−gy）
-  const SOBEL_S = 1.6;
-  const Hh = (x, y) => h[Math.min(Math.max(y,0),H-1)*W + Math.min(Math.max(x,0),W-1)];
-  const normal = document.createElement("canvas"); normal.width = W; normal.height = H;
+  // 高度图单独输出（灰度），法线统一由「高度图 → 法线」转换器生成（单一管线）
   const height = document.createElement("canvas"); height.width = W; height.height = H;
-  const nc = normal.getContext("2d"), hc = height.getContext("2d");
-  const nImg = nc.createImageData(W, H), hImg = hc.createImageData(W, H);
-  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
-    const i = y*W + x, o = i*4;
-    const gx = (Hh(x-1,y-1)+2*Hh(x-1,y)+Hh(x-1,y+1)) - (Hh(x+1,y-1)+2*Hh(x+1,y)+Hh(x+1,y+1));
-    const gy = (Hh(x-1,y-1)+2*Hh(x,y-1)+Hh(x+1,y-1)) - (Hh(x-1,y+1)+2*Hh(x,y+1)+Hh(x+1,y+1));
-    let nx = gx*SOBEL_S, ny = -gy*SOBEL_S, nz = 1;
-    const len = Math.hypot(nx, ny, nz); nx /= len; ny /= len; nz /= len;
-    nImg.data[o] = (nx*0.5+0.5)*255; nImg.data[o+1] = (ny*0.5+0.5)*255; nImg.data[o+2] = (nz*0.5+0.5)*255; nImg.data[o+3] = 255;
+  const hc = height.getContext("2d");
+  const hImg = hc.createImageData(W, H);
+  for (let i = 0, o = 0; i < W*H; i++, o += 4) {
     const hv = Math.min(h[i]/21, 1)*255;
     hImg.data[o] = hImg.data[o+1] = hImg.data[o+2] = hv; hImg.data[o+3] = 255;
   }
-  nc.putImageData(nImg, 0, 0); hc.putImageData(hImg, 0, 0);
+  hc.putImageData(hImg, 0, 0);
   // Diffuse：圆顶分档底色（刻意压淡，让光照负责明暗）+ 描边 + 眼嘴
   const C = { out:"#17251a", base:"#58b14c", hi:"#7ac95f", lo:"#46963c", eye:"#f2f5f0", pupil:"#232f38", mouth:"#2e4a33" };
   const diffuse = document.createElement("canvas"); diffuse.width = W; diffuse.height = H;
@@ -512,12 +554,123 @@ function makeSample(){
     dImg.data[o] = c[0]; dImg.data[o+1] = c[1]; dImg.data[o+2] = c[2]; dImg.data[o+3] = 255;
   }
   dc.putImageData(dImg, 0, 0);
-  return { diffuse, normal, height };
+  return { diffuse, height };
 }
+/* ═══ 高度图 → 法线 转换器（P1：算子/强度/平滑/边界/反相，实时预览+送入） ═══ */
+const conv = { out: document.createElement("canvas"), timer: 0 };
+const convOpName = { sobel3:"Sobel 3×3", scharr3:"Scharr 3×3", central:"中心差分" };
+
+function scheduleConvert(){
+  clearTimeout(conv.timer);
+  conv.timer = setTimeout(runConvert, 60);
+}
+function readHeight(img){
+  const c = document.createElement("canvas");
+  c.width = img.width; c.height = img.height;
+  const ctx = c.getContext("2d", { willReadFrequently:true });
+  ctx.drawImage(img, 0, 0);
+  const d = ctx.getImageData(0, 0, c.width, c.height).data;
+  const arr = new Float32Array(c.width*c.height);        // 0..255 亮度
+  for (let i = 0, o = 0; i < arr.length; i++, o += 4)
+    arr[i] = 0.2126*d[o] + 0.7152*d[o+1] + 0.0722*d[o+2];
+  return { w:c.width, h:c.height, arr };
+}
+function blur2(a, w, h, r, wrap){                        // 可分离 box blur ×2 轮 ≈ 高斯
+  if (r <= 0) return a;
+  const idx = (x, y) => {
+    if (wrap) { x = ((x%w)+w)%w; y = ((y%h)+h)%h; }
+    else { x = Math.min(Math.max(x,0), w-1); y = Math.min(Math.max(y,0), h-1); }
+    return y*w + x;
+  };
+  const buf = new Float32Array(a.length);
+  for (let pass = 0; pass < 2; pass++) {
+    for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+      let s = 0;
+      for (let k = -r; k <= r; k++) s += a[idx(x + k, y)];
+      buf[y*w + x] = s/(2*r + 1);
+    }
+    for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+      let s = 0;
+      for (let k = -r; k <= r; k++) s += buf[idx(x, y + k)];
+      a[y*w + x] = s/(2*r + 1);
+    }
+  }
+  return a;
+}
+function runConvert(force){
+  if (!state.height) {
+    const c = $("convPrev").getContext("2d");
+    c.clearRect(0, 0, 96, 96);
+    $("convInfo").textContent = "先在素材区拖入高度图";
+    return;
+  }
+  const t0 = performance.now();
+  const op = $("convOp").value, s = +$("convStrength").value, edge = $("convEdge").value;
+  const src = readHeight(state.height);
+  let a = src.arr;
+  if ($("convInvert").checked) {
+    const inv = new Float32Array(a.length);
+    for (let i = 0; i < a.length; i++) inv[i] = 255 - a[i];
+    a = inv;
+  }
+  a = blur2(a, src.w, src.h, +$("convBlur").value, edge === "wrap");
+  const W = src.w, H = src.h;
+  const Hh = (x, y) => {
+    if (edge === "wrap") { x = ((x%W)+W)%W; y = ((y%H)+H)%H; }
+    else { x = Math.min(Math.max(x,0), W-1); y = Math.min(Math.max(y,0), H-1); }
+    return a[y*W + x];
+  };
+  const out = new Float32Array(W*H*3);
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+    let gx, gy;
+    if (op === "central") {
+      gx = (Hh(x-1,y) - Hh(x+1,y))/2; gy = (Hh(x,y-1) - Hh(x,y+1))/2;
+    } else {
+      const wv = op === "scharr3" ? [3,10,3] : [1,2,1];
+      const norm = op === "scharr3" ? 32 : 8;            // 归一化：算子输出 ≈ ∂高度/像素，强度跨算子可比
+      const L = Hh(x-1,y-1)*wv[0] + Hh(x-1,y)*wv[1] + Hh(x-1,y+1)*wv[2];
+      const R = Hh(x+1,y-1)*wv[0] + Hh(x+1,y)*wv[1] + Hh(x+1,y+1)*wv[2];
+      const T = Hh(x-1,y-1)*wv[0] + Hh(x,y-1)*wv[1] + Hh(x+1,y-1)*wv[2];
+      const B = Hh(x-1,y+1)*wv[0] + Hh(x,y+1)*wv[1] + Hh(x+1,y+1)*wv[2];
+      gx = (L - R)/norm; gy = (T - B)/norm;
+    }
+    let nx = gx*s, ny = -gy*s, nz = 1;                   // 与光照同约定（OpenGL，y 向上）：R=+gx、G=−gy
+    const len = Math.hypot(nx, ny, nz); nx /= len; ny /= len; nz /= len;
+    const o = (y*W + x)*3;
+    out[o] = (nx*0.5 + 0.5)*255; out[o+1] = (ny*0.5 + 0.5)*255; out[o+2] = (nz*0.5 + 0.5)*255;
+  }
+  const outCv = document.createElement("canvas");        // 每次产出新快照：关掉「实时送入」时，
+  outCv.width = W; outCv.height = H;                     // 已送入的旧法线画布不被改写，光照真正冻结
+  const cctx = outCv.getContext("2d");
+  const im = cctx.createImageData(W, H);
+  for (let i = 0, o3 = 0, o4 = 0; i < W*H; i++, o3 += 3, o4 += 4) {
+    im.data[o4] = out[o3]; im.data[o4+1] = out[o3+1]; im.data[o4+2] = out[o3+2]; im.data[o4+3] = 255;
+  }
+  cctx.putImageData(im, 0, 0);
+  conv.out = outCv;
+  const cv = $("convPrev"), pc = cv.getContext("2d");
+  pc.imageSmoothingEnabled = false;
+  pc.clearRect(0, 0, cv.width, cv.height);
+  const sc = Math.max(cv.width/W, cv.height/H);
+  pc.drawImage(outCv, (cv.width - W*sc)/2, (cv.height - H*sc)/2, W*sc, H*sc);
+  $("convInfo").textContent = W + "×" + H + " · " + convOpName[op] + " · " + (performance.now() - t0).toFixed(1) + "ms";
+  if (force || $("convLive").checked) setNormal(outCv, "转换·" + convOpName[op] + "·s" + s.toFixed(2));
+}
+$("btnApply").addEventListener("click", () => runConvert(true));
+for (const id of ["convOp","convEdge","convInvert","convLive"]) $(id).addEventListener("change", scheduleConvert);
+for (const id of ["convStrength","convBlur"]) $(id).addEventListener("input", () => {
+  $("" + id + "v").textContent = (+$(id).value).toFixed(id === "convBlur" ? 0 : 2);
+  scheduleConvert();
+});
+
 $("btnSample").addEventListener("click", () => {
+  // 示例素材同步转换器到已知良好参数（s=1.2 ≈ P0 期原始 Sobel×1.6 的视觉效果）
+  $("convOp").value = "sobel3"; $("convStrength").value = "1.2"; $("convStrengthv").textContent = "1.20";
+  $("convBlur").value = "0"; $("convBlurv").textContent = "0";
+  $("convEdge").value = "clamp"; $("convInvert").checked = false;
   const s = makeSample();
   setDiffuse(s.diffuse, "示例·史莱姆");
-  setNormal(s.normal, "示例·法线(Sobel)");
+  setHeight(s.height, "示例·高度场");
 });
 
 /* 启动：直接载入示例，立即可玩 */
