@@ -257,8 +257,13 @@ th,td { padding:3px 6px; text-align:left; }
         <div class="row"><label>1px 描边</label><input type="checkbox" id="outline" checked><span class="unit">启用</span><input type="color" id="outlineColor" value="#000000"></div>
       </div>
       <div class="field">
-        <div class="row"><label>绿幕抠像</label>
-          <select id="key"><option value="auto">auto（检测绿幕）</option><option value="none">none</option><option value="green">强制绿幕</option></select>
+        <div class="row"><label>幕色抠像</label>
+          <select id="key"><option value="auto">auto（检测幕色）</option><option value="none">none</option><option value="green" title="主体忌含绿">强制绿幕</option><option value="magenta" title="主体含绿/蓝均可，像素画透明惯例色">强制品红幕</option><option value="blue" title="主体含绿（植被/绿衣）时用，主体忌含蓝">强制蓝幕</option><option value="cyan" title="主体全暖色调时用，主体忌含青/蓝绿">强制青幕</option><option value="custom" title="点击画面或用选色器取任意键色">custom（自由取色）</option></select>
+        </div>
+        <div class="row" id="customRow" hidden><label>键色</label>
+          <button class="mini" id="pickKey">取键色</button>
+          <input type="color" id="keyColor" value="#00b140" title="点击画面取色，或在此选任意色">
+          <span class="note" id="keyHex">未设置</span>
         </div>
       </div>
     </fieldset>
@@ -316,24 +321,64 @@ function rgbToOklab(r, g, b) {
 }
 function oklabDist2(a, b) { const dL = a[0]-b[0], da = a[1]-b[1], db = a[2]-b[2]; return dL*dL + da*da + db*db; }
 
-/* 绿幕检测/抠像（与 pixel-toolkit/video.py 语义一致） */
-function isGreenish(r, g, b) { return g > 60 && g > r * 1.1 && g > b * 1.1; }
-function detectGreen(id) {
+/* 幕色检测/抠像：绿幕判定与 pixel-toolkit/video.py 语义一致（逐字节同条件）；
+   品红/蓝/青按同形「主通道占优」推广——双主通道键（品红 R≈B≫G、青 G≈B≫R）两主通道均须占优 */
+const KEY_TESTS = {
+  green:   (r,g,b) => g > 60 && g > r*1.1 && g > b*1.1 && (g-r) > 40 && (g-b) > 40,
+  magenta: (r,g,b) => r > 60 && b > 60 && r > g*1.1 && b > g*1.1 && (r-g) > 40 && (b-g) > 40,
+  blue:    (r,g,b) => b > 60 && b > r*1.1 && b > g*1.1 && (b-r) > 40 && (b-g) > 40,
+  cyan:    (r,g,b) => g > 60 && b > 60 && g > r*1.1 && b > r*1.1 && (g-r) > 40 && (b-r) > 40,
+};
+function detectKey(id) {   // 四角均值落在哪种幕色（绿优先，向后兼容旧素材口径）
   const px = (x,y) => { const i=(y*id.width+x)*4; return [id.data[i],id.data[i+1],id.data[i+2]]; };
   const w = id.width, h = id.height;
   const c = [px(0,0), px(w-1,0), px(0,h-1), px(w-1,h-1)];
   const sum = [0,0,0];
   for (const p of c) { sum[0]+=p[0]; sum[1]+=p[1]; sum[2]+=p[2]; }
   const avg = [sum[0]/4|0, sum[1]/4|0, sum[2]/4|0];
-  return isGreenish(avg[0], avg[1], avg[2]);
+  for (const k of ['green','magenta','blue','cyan']) if (KEY_TESTS[k](avg[0], avg[1], avg[2])) return k;
+  return null;
 }
-function chromaKey(id) {   // 色度判定，绿→透明（与视频标准化口径一致）
+/* 自由取色：任意键色 → 与四预设完全同形的「主通道占优」判定。
+   通道差 ≥30 定结构（单主通道=绿/蓝型，双主通道=品红/青型）；四预设色代入可逐字节复现对应预设。
+   低饱和（主通道不显著）返回 null——与只比色品不比明度的口径冲突，会误伤主体灰暗部。 */
+function testFromRGB(r, g, b) {
+  const v = [r, g, b];
+  const idx = [0, 1, 2].sort((a, c) => v[c] - v[a]);
+  let dom;
+  if (v[idx[0]] - v[idx[1]] >= 30) dom = [idx[0]];
+  else if (v[idx[1]] - v[idx[2]] >= 30) dom = [idx[0], idx[1]];
+  else return null;
+  const weak = [0, 1, 2].filter(i => !dom.includes(i));
+  return (pr, pg, pb) => {
+    const p = [pr, pg, pb];
+    return dom.every(d => p[d] > 60 && weak.every(w => p[d] > p[w] * 1.1 && (p[d] - p[w]) > 40));
+  };
+}
+let CUSTOM_TEST = null;    // custom 模式的键色判定（取色后由 testFromRGB 生成）
+let pickingKey = false;    // 取键色模式：点击预览画面读原始帧像素
+function chromaKey(id, test) {   // 判定 test(r,g,b) 命中 → 透明（与视频标准化口径一致）
+  if (!test) return id;
   const d = new Uint8ClampedArray(id.data), w = id.width, h = id.height;
   for (let i = 0; i < d.length; i += 4) {
-    const r=d[i], g=d[i+1], b=d[i+2];
-    if (d[i+3] && g > 60 && g > r*1.1 && g > b*1.1 && (g-r) > 40 && (g-b) > 40) { d[i]=d[i+1]=d[i+2]=0; d[i+3]=0; }
+    if (d[i+3] && test(d[i], d[i+1], d[i+2])) { d[i]=d[i+1]=d[i+2]=0; d[i+3]=0; }
   }
   return { width:w, height:h, data:d };
+}
+function keyApply(id, mode) {           // auto → 四角检测幕色；强制 → 所选幕色；custom → 取色判定
+  let test = KEY_TESTS[mode];
+  if (mode === 'auto') { const k = detectKey(id); test = k ? KEY_TESTS[k] : null; }
+  else if (mode === 'custom') test = CUSTOM_TEST;
+  return test ? chromaKey(id, test) : id;
+}
+function setCustomKey(rgb) {            // 设置自由键色：推导判定 + 更新 UI + 防抖重处理
+  const test = testFromRGB(rgb[0], rgb[1], rgb[2]);
+  const hex = '#' + rgb.map(c => c.toString(16).padStart(2, '0')).join('');
+  if (!test) { setStatus(`键色 ${hex} 主通道不显著（低饱和色），无法按主通道口径抠像`, true); return false; }
+  CUSTOM_TEST = test;
+  $('keyColor').value = hex; $('keyHex').textContent = hex + '（可重新取色/选色）';
+  onParamChange('keyColor');            // 走既有防抖 → reprocess（选色器拖动时不刷屏）
+  return true;
 }
 
 /* 透明像素统计 + 内容 bbox（alpha 判据） */
@@ -635,7 +680,7 @@ function frameToImageData(src) {
 function processFrame(id) {
   let img = { width:id.width, height:id.height, data:new Uint8ClampedArray(id.data) };
   const key = $('key').value;
-  if (key === 'green' || (key === 'auto' && detectGreen(img))) img = chromaKey(img);
+  img = keyApply(img, key);
   const ow = Math.max(1,+$('ow').value||64), oh = Math.max(1,+$('oh').value||64);
   img = downsampleContain(img, ow, oh);
   return img;
@@ -655,7 +700,7 @@ function processAll(frames) {
   let ref = null;
   for (const f of frames) {
     const im = { width:f.width, height:f.height, data:new Uint8ClampedArray(f.data) };
-    const img = (key === 'green' || (key === 'auto' && detectGreen(im))) ? chromaKey(im) : im;
+    const img = keyApply(im, key);
     const b = alphaStats(img).bbox;
     if (!b) continue;
     ref = ref ? [Math.min(ref[0],b[0]), Math.min(ref[1],b[1]), Math.max(ref[2],b[2]), Math.max(ref[3],b[3])] : b;
@@ -668,7 +713,7 @@ function processAll(frames) {
   const raw = [];
   for (const f of frames) { const im = { width:f.width, height:f.height, data:new Uint8ClampedArray(f.data) };
     let img = im;
-    if (key === 'green' || (key === 'auto' && detectGreen(img))) img = chromaKey(img);
+    img = keyApply(img, key);
     img = cropToBox(img, ref);
     img = downsampleContain(img, ow, oh, fit);
     img = placeOnCanvas(img, cw, ch, dx, dy);   // 不做形心锚定（源位置亚像素稳定，锚定反而制造台阶抖动）
@@ -1026,6 +1071,42 @@ function init() {
   $('frameIdx').oninput = e => { showFrame(+e.target.value); };
   $('zoom').oninput = e => { $('zoomN').value=e.target.value; if (V.processed.length) renderFrame(V.processed[V.fidx], +e.target.value); };
   $('zoomN').oninput = e => { $('zoom').value=e.target.value; if (V.processed.length) renderFrame(V.processed[V.fidx], +e.target.value); };
+
+  // 幕色抠像：custom 自由取色（点击预览读原始帧像素 / 选色器任意色）
+  const updateKeyVis = () => { $('customRow').hidden = $('key').value !== 'custom'; };
+  $('key').addEventListener('change', () => {
+    updateKeyVis();
+    if ($('key').value === 'custom' && !CUSTOM_TEST) setStatus('custom 模式：点「取键色」后点击画面，或用选色器选任意键色');
+  });
+  updateKeyVis();
+  $('pickKey').onclick = () => {
+    if (!V.raw || !V.raw.length) { setStatus('先「▶ 处理」一次，才有原始帧可取色', true); return; }
+    pickingKey = true;
+    renderFrame(V.raw[Math.min(V.fidx, V.raw.length-1)], +$('zoomN').value || 4);   // 预览切到原始帧：点击坐标 ↔ 原图像素精确对应
+    setStatus('取键色：点击预览画面（读原始帧像素），Esc 取消');
+  };
+  $('vstage').addEventListener('click', e => {
+    if (!pickingKey) return;
+    const cv = $('vstage').querySelector('canvas');
+    const raw = V.raw && V.raw[Math.min(V.fidx, V.raw.length-1)];
+    if (!cv || !raw) return;
+    const r = cv.getBoundingClientRect();
+    const x = Math.floor((e.clientX - r.left) / r.width * raw.width);
+    const y = Math.floor((e.clientY - r.top) / r.height * raw.height);
+    if (x < 0 || y < 0 || x >= raw.width || y >= raw.height) return;
+    const i = (y * raw.width + x) * 4;
+    pickingKey = false;
+    if (setCustomKey([raw.data[i], raw.data[i+1], raw.data[i+2]])) setStatus('键色 = ' + $('keyColor').value + '（已重处理）');
+    else renderFrame(V.processed[V.fidx] || raw, +$('zoomN').value || 4);   // 无效键色：还原预览
+  });
+  $('keyColor').addEventListener('input', e => setCustomKey(hexToRgb(e.target.value)));
+  document.addEventListener('keydown', e => {
+    if (e.key === 'Escape' && pickingKey) {
+      pickingKey = false;
+      if (V.processed[V.fidx]) renderFrame(V.processed[V.fidx], +$('zoomN').value || 4);
+      setStatus('已取消取键色');
+    }
+  });
 
   // 处理参数（oninput 即时 + 防抖）：fps 需重抽帧；其余仅重跑管线
   ['fps','ow','oh','cw','ch','dx','dy','colors','fit','outline','outlineColor','key'].forEach(id => {
