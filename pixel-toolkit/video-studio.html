@@ -131,7 +131,7 @@ button.mini { padding:3px 9px; font-size:12px; border-radius:6px; }
 
 /* ── 拖放区（唯一允许 lavender 提示的交互位：主导入 CTA） ── */
 #drop {
-  width:100%; min-height:150px;
+  width:100%; min-height:150px; margin-bottom:12px;   /* 与 fieldset 的 12px 块间距统一 */
   border:1px dashed var(--edge-hi); border-radius:12px; background:var(--bg);
   display:flex; flex-direction:column; gap:4px; align-items:center; justify-content:center;
   text-align:center; color:var(--sub); cursor:pointer;
@@ -151,7 +151,8 @@ button.mini { padding:3px 9px; font-size:12px; border-radius:6px; }
 }
 #vstage img,#vstage canvas { display:block; background:repeating-conic-gradient(#141516 0 25%, #0d0e10 0 50%) 0 0/24px 24px; border-radius:2px; }
 #vmeta {
-  margin-top:10px; color:var(--sub); font-size:12px; white-space:pre;
+  margin:0 0 12px;   /* 上方由 #drop 的 12px 下边距负责，自身挂 12px 下边距与卡片节奏统一 */
+  color:var(--sub); font-size:12px; white-space:pre;
   font-variant-numeric:tabular-nums;   /* 文件名+中文混排，不用 mono 栈 */
   background:var(--bg); border:1px solid var(--edge); border-radius:8px; padding:7px 10px;
 }
