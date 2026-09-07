@@ -2,7 +2,7 @@
 <html lang="zh">
 <head>
 <meta charset="utf-8">
-<title>Pixel-Normal 像素法线实验室（P0 光照查看器）</title>
+<title>Pixel-Normal 像素法线实验室（P0–P2）</title>
 <style>
 /* ── Linear 设计系统 token（与 video-studio 同源：表面阶梯 + 发丝线 + 稀缺薰衣草蓝） ── */
 :root {
@@ -133,7 +133,7 @@ button.mini { padding:3px 9px; font-size:12px; border-radius:6px; }
 <body>
 <header>
   <h1>Pixel-Normal 像素法线实验室</h1>
-  <span class="sub">diffuse × normal 实时光照查看（P0 · 实验/原型）</span>
+  <span class="sub">diffuse × normal 实时光照 · 高度图/Alpha 距离场转法线（P0–P2 · 实验/原型）</span>
   <div id="status"></div>
 </header>
 <main>
@@ -165,13 +165,29 @@ button.mini { padding:3px 9px; font-size:12px; border-radius:6px; }
         <input type="file" id="fileHeight" accept="image/*">
       </div>
       <div class="btnbar">
-        <button id="btnSample" class="primary mini">载入示例素材</button>
+        <button id="btnSample" class="primary mini">示例·史莱姆</button>
+        <button id="btnFlat" class="mini">示例·药水瓶</button>
         <button id="btnClear" class="mini">清空</button>
       </div>
-      <div class="hint">示例素材为程序生成：史莱姆高度场经「高度图 → 法线」管线实时转换（路线 B 预演）。</div>
+      <div class="hint">示例素材为程序生成：史莱姆＝高度场经「高度场 → 法线」管线（路线 B）；药水瓶＝平面精灵（无高度图），走 Alpha 距离场 bevel（P2）。</div>
     </fieldset>
 
-    <fieldset aria-label="高度图转法线"><div class="cap">高度图 → 法线</div>
+    <fieldset aria-label="高度场转法线"><div class="cap">高度场 → 法线</div>
+      <div class="row"><label>源</label>
+        <select id="convSrc" style="flex:1">
+          <option value="lum" selected>高度图亮度（Height 槽）</option>
+          <option value="alpha">Alpha 距离场（Diffuse 轮廓）</option>
+        </select>
+      </div>
+      <div class="row" id="rowBevel" style="display:none"><label>斜面宽</label><input type="range" id="bevelW" min="1" max="48" step="1" value="6"><span class="val" id="bevelWv">6</span></div>
+      <div class="row" id="rowProfile" style="display:none"><label>坡形</label>
+        <select id="bevelProfile" style="flex:1">
+          <option value="smooth" selected>缓坡（smoothstep）</option>
+          <option value="linear">线性（45°）</option>
+          <option value="arc">圆坡（四分弧）</option>
+        </select>
+      </div>
+      <div class="row" id="rowBevelFull" style="display:none"><label>全距</label><input type="checkbox" id="bevelFull"><span class="hint" style="margin:0">以图内最大内距为斜面宽；凸形轮廓≈圆顶</span></div>
       <div class="row"><label>算子</label>
         <select id="convOp" style="flex:1">
           <option value="sobel3" selected>Sobel 3×3</option>
@@ -196,7 +212,8 @@ button.mini { padding:3px 9px; font-size:12px; border-radius:6px; }
           <div class="hint" id="convInfo">先在素材区拖入高度图</div>
         </div>
       </div>
-      <div class="hint">亮度 → 梯度 → 法线；算子已归一化，强度＝梯度倍率（经验值 0.5～2）。平滑先把台阶变连续坡，抑制硬边锯齿。</div>
+      <div class="hint">高度 → 梯度 → 法线；算子已归一化，强度＝梯度倍率（经验值 0.5～2）。平滑先把台阶变连续坡，抑制硬边锯齿。</div>
+      <div class="hint">Alpha 距离场：轮廓向内的精确欧氏距离 → 斜面高度（无高度图的平面精灵一键出法线；洞与凹陷自动出 rim）。反相＝内凹效果。</div>
     </fieldset>
 
     <fieldset aria-label="视图"><div class="cap">视图</div>
@@ -244,7 +261,7 @@ button.mini { padding:3px 9px; font-size:12px; border-radius:6px; }
   <section id="center">
     <div class="stage-head"><h2>预览</h2><span class="hint" style="margin:0">albedo 按 sRGB 解读、法线按线性采样；光照在线性域计算后回编 sRGB</span></div>
     <div id="stage">
-      <div id="empty"><b>拖入 diffuse + normal，或点「载入示例素材」</b><br>左槽＝固有色图　右槽＝法线图（淡紫平坦 → 有起伏）</div>
+      <div id="empty"><b>拖入 diffuse + normal，或点示例按钮</b><br>左槽＝固有色图　右槽＝法线图（淡紫平坦 → 有起伏）<br>只有 diffuse？把「高度场 → 法线」的源切到 Alpha 距离场，一键出法线</div>
       <canvas id="glc"></canvas>
     </div>
   </section>
@@ -412,6 +429,7 @@ function setDiffuse(img, name){
   drawThumb($("thDiffuse"), img);
   markSlot("slotDiffuse", name, img.width + "×" + img.height);
   if (!state.lightSeen) { state.lightX = state.w/2; state.lightY = state.h*0.2; state.lightSeen = true; }
+  if ($("convSrc").value === "alpha") scheduleConvert();   // 距离场模式：diffuse 换图即重算
   refresh();
 }
 function setNormal(img, name){
@@ -556,13 +574,18 @@ function makeSample(){
   dc.putImageData(dImg, 0, 0);
   return { diffuse, height };
 }
-/* ═══ 高度图 → 法线 转换器（P1：算子/强度/平滑/边界/反相，实时预览+送入） ═══ */
+/* ═══ 高度图 → 法线 转换器（P1：算子/强度/平滑/边界/反相，实时预览+送入；P2：源可切 Alpha 距离场 bevel） ═══ */
 const conv = { out: document.createElement("canvas"), timer: 0 };
 const convOpName = { sobel3:"Sobel 3×3", scharr3:"Scharr 3×3", central:"中心差分" };
+const bevelProfileName = { smooth:"缓坡", linear:"线性", arc:"圆坡" };
 
 function scheduleConvert(){
   clearTimeout(conv.timer);
   conv.timer = setTimeout(runConvert, 60);
+}
+function updateConvUI(){                                // 源切换时显示/隐藏距离场专用行
+  const alpha = $("convSrc").value === "alpha";
+  for (const id of ["rowBevel","rowProfile","rowBevelFull"]) $(id).style.display = alpha ? "" : "none";
 }
 function readHeight(img){
   const c = document.createElement("canvas");
@@ -597,16 +620,89 @@ function blur2(a, w, h, r, wrap){                        // 可分离 box blur �
   }
   return a;
 }
+/* ── Alpha 距离场 bevel（P2）：轮廓 → 精确欧氏距离 → 坡形高度场 ── */
+function dt1d(f){                                       // 一维平方距离变换（Felzenszwalb 下包络，精确 EDT 的行/列 pass）
+  const n = f.length, INF = 1e15;
+  const d = new Float64Array(n), v = new Int32Array(n), z = new Float64Array(n + 1);
+  let k = 0; v[0] = 0; z[0] = -INF; z[1] = INF;
+  for (let q = 1; q < n; q++){
+    let s = ((f[q] + q*q) - (f[v[k]] + v[k]*v[k]))/(2*q - 2*v[k]);
+    while (s <= z[k]){ k--; s = ((f[q] + q*q) - (f[v[k]] + v[k]*v[k]))/(2*q - 2*v[k]); }
+    k++; v[k] = q; z[k] = s; z[k + 1] = INF;
+  }
+  k = 0;
+  for (let q = 0; q < n; q++){
+    while (z[k + 1] < q) k++;
+    d[q] = (q - v[k])*(q - v[k]) + f[v[k]];
+  }
+  return d;
+}
+function edt(mask, W, H){                               // 每个 inside 像素到最近 outside 像素的精确欧氏距离（像素单位）
+  const INF = 1e15;
+  const g = new Float64Array(W*H);
+  for (let i = 0; i < g.length; i++) g[i] = mask[i] ? INF : 0;
+  const buf = new Float64Array(Math.max(W, H));
+  for (let x = 0; x < W; x++){                          // 先按列
+    for (let y = 0; y < H; y++) buf[y] = g[y*W + x];
+    const d = dt1d(buf.subarray(0, H));
+    for (let y = 0; y < H; y++) g[y*W + x] = d[y];
+  }
+  for (let y = 0; y < H; y++){                          // 再按行
+    for (let x = 0; x < W; x++) buf[x] = g[y*W + x];
+    const d = dt1d(buf.subarray(0, W));
+    for (let x = 0; x < W; x++) g[y*W + x] = d[x];
+  }
+  const out = new Float32Array(W*H);
+  for (let i = 0; i < out.length; i++) out[i] = Math.sqrt(g[i]);
+  return out;
+}
+function alphaBevelHeight(img){                         // Diffuse 的 alpha 轮廓 → 0..255 高度场（outside=0）
+  const c = document.createElement("canvas");
+  c.width = img.width; c.height = img.height;
+  const ctx = c.getContext("2d", { willReadFrequently:true });
+  ctx.drawImage(img, 0, 0);
+  const d = ctx.getImageData(0, 0, c.width, c.height).data;
+  const W = c.width, H = c.height;
+  const mask = new Uint8Array(W*H);                     // 两态：a≥128 为 inside（与着色器 discard a<0.5 同阈值）
+  let anyOut = false;
+  for (let i = 0; i < mask.length; i++){
+    const inside = d[i*4 + 3] >= 128;
+    mask[i] = inside ? 1 : 0;
+    if (!inside) anyOut = true;
+  }
+  if (!anyOut) return null;                             // 全不透明：无轮廓可建距离场
+  const dist = edt(mask, W, H);
+  let maxd = 0;
+  for (let i = 0; i < dist.length; i++) if (mask[i] && dist[i] > maxd) maxd = dist[i];
+  const full = $("bevelFull").checked;
+  const b = full ? maxd : +$("bevelW").value;
+  const prof = $("bevelProfile").value;
+  const arr = new Float32Array(W*H);
+  for (let i = 0; i < arr.length; i++){
+    if (!mask[i]) continue;                             // outside 高度 0（斜面的"地面"）
+    const u = Math.min(dist[i]/b, 1);
+    const t = prof === "linear" ? u : prof === "arc" ? Math.sqrt(1 - (1 - u)*(1 - u)) : u*u*(3 - 2*u);
+    arr[i] = 255*t;
+  }
+  return { w:W, h:H, arr, label:"距离场·b" + (full ? "全距" : b) + "·" + bevelProfileName[prof] };
+}
 function runConvert(force){
-  if (!state.height) {
+  const noSrc = msg => {
     const c = $("convPrev").getContext("2d");
     c.clearRect(0, 0, 96, 96);
-    $("convInfo").textContent = "先在素材区拖入高度图";
-    return;
+    $("convInfo").textContent = msg;
+  };
+  let src;
+  if ($("convSrc").value === "alpha") {                 // P2：Diffuse 轮廓 → 距离场高度
+    if (!state.diffuse) return noSrc("距离场模式：先在素材区载入 Diffuse");
+    src = alphaBevelHeight(state.diffuse);
+    if (!src) return noSrc("Diffuse 无透明像素，建不了距离场");
+  } else {
+    if (!state.height) return noSrc("先在素材区拖入高度图");
+    src = readHeight(state.height);
   }
   const t0 = performance.now();
   const op = $("convOp").value, s = +$("convStrength").value, edge = $("convEdge").value;
-  const src = readHeight(state.height);
   let a = src.arr;
   if ($("convInvert").checked) {
     const inv = new Float32Array(a.length);
@@ -653,24 +749,79 @@ function runConvert(force){
   pc.clearRect(0, 0, cv.width, cv.height);
   const sc = Math.max(cv.width/W, cv.height/H);
   pc.drawImage(outCv, (cv.width - W*sc)/2, (cv.height - H*sc)/2, W*sc, H*sc);
-  $("convInfo").textContent = W + "×" + H + " · " + convOpName[op] + " · " + (performance.now() - t0).toFixed(1) + "ms";
-  if (force || $("convLive").checked) setNormal(outCv, "转换·" + convOpName[op] + "·s" + s.toFixed(2));
+  $("convInfo").textContent = W + "×" + H + (src.label ? " · " + src.label : "") + " · " + convOpName[op] + " · " + (performance.now() - t0).toFixed(1) + "ms";
+  if (force || $("convLive").checked) setNormal(outCv, "转换·" + (src.label ? src.label + "·" : "") + convOpName[op] + "·s" + s.toFixed(2));
 }
 $("btnApply").addEventListener("click", () => runConvert(true));
-for (const id of ["convOp","convEdge","convInvert","convLive"]) $(id).addEventListener("change", scheduleConvert);
+$("convSrc").addEventListener("change", () => { updateConvUI(); scheduleConvert(); });
+for (const id of ["convOp","convEdge","convInvert","convLive","bevelProfile","bevelFull"]) $(id).addEventListener("change", scheduleConvert);
 for (const id of ["convStrength","convBlur"]) $(id).addEventListener("input", () => {
   $("" + id + "v").textContent = (+$(id).value).toFixed(id === "convBlur" ? 0 : 2);
   scheduleConvert();
 });
+$("bevelW").addEventListener("input", () => { $("bevelWv").textContent = $("bevelW").value; scheduleConvert(); });
 
 $("btnSample").addEventListener("click", () => {
   // 示例素材同步转换器到已知良好参数（s=1.2 ≈ P0 期原始 Sobel×1.6 的视觉效果）
+  $("convSrc").value = "lum"; updateConvUI();
   $("convOp").value = "sobel3"; $("convStrength").value = "1.2"; $("convStrengthv").textContent = "1.20";
   $("convBlur").value = "0"; $("convBlurv").textContent = "0";
   $("convEdge").value = "clamp"; $("convInvert").checked = false;
   const s = makeSample();
   setDiffuse(s.diffuse, "示例·史莱姆");
   setHeight(s.height, "示例·高度场");
+});
+
+/* ═══ 示例·药水瓶：平面精灵（无高度图），演示 Alpha 距离场 bevel 一键出法线 ═══ */
+function makeFlatSample(){
+  const W = 64, H = 64;
+  const CX = 32, CY = 41, R = 16;                      // 瓶身圆
+  const inFlask = (x, y) => { const dx = x - CX, dy = y - CY; return dx*dx + dy*dy <= R*R; };
+  const inNeck  = (x, y) => x >= 29 && x <= 34 && y >= 14 && y <= 26;   // 瓶颈（下端没入瓶身）
+  const inCork  = (x, y) => x >= 27 && x <= 36 && y >= 8 && y <= 13;    // 软木塞
+  const mask = new Uint8Array(W*H);
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++)
+    if (inFlask(x, y) || inNeck(x, y) || inCork(x, y)) mask[y*W + x] = 1;
+  const outline = new Uint8Array(W*H);                 // 轮廓＝inside 且 4 邻域有 outside
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++){
+    if (!mask[y*W + x]) continue;
+    if (!mask[y*W + x-1] || !mask[y*W + x+1] || !mask[(y-1)*W + x] || !mask[(y+1)*W + x]) outline[y*W + x] = 1;
+  }
+  // 全平面色块（刻意无明暗渐变——立体感完全交给距离场法线+光照）
+  const C = { out:"#241a2b", glass:"#a8c6d4", glassHi:"#dcf0f6", cork:"#a9743f", corkHi:"#c7955c",
+              liq:"#c93f96", liqLo:"#8e2368", bubble:"#ef8ec9" };
+  const hex = s => [parseInt(s.slice(1,3),16), parseInt(s.slice(3,5),16), parseInt(s.slice(5,7),16)];
+  const pal = Object.fromEntries(Object.entries(C).map(([k, v]) => [k, hex(v)]));
+  const diffuse = document.createElement("canvas"); diffuse.width = W; diffuse.height = H;
+  const dc = diffuse.getContext("2d");
+  const dImg = dc.createImageData(W, H);
+  const bubble = (x, y) => (x >= 27 && x <= 28 && y === 46) || (x >= 36 && x <= 37 && y >= 50 && y <= 51) || (x === 32 && y === 52);
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++){
+    const i = y*W + x, o = i*4;
+    if (!mask[i]) { dImg.data[o+3] = 0; continue; }
+    let c;
+    if (outline[i]) c = pal.out;
+    else if (inCork(x, y)) c = y <= 9 ? pal.corkHi : pal.cork;
+    else if (inFlask(x, y) && y >= 44) c = bubble(x, y) ? pal.bubble : (y >= 50 || (x-CX)*(x-CX) + (y-CY)*(y-CY) > (R-3)*(R-3) ? pal.liqLo : pal.liq);
+    else if (x >= 28 && x <= 29 && y >= 30 && y <= 36) c = pal.glassHi;   // 左侧高光竖条（平面亮色，非渐变）
+    else c = pal.glass;
+    dImg.data[o] = c[0]; dImg.data[o+1] = c[1]; dImg.data[o+2] = c[2]; dImg.data[o+3] = 255;
+  }
+  dc.putImageData(dImg, 0, 0);
+  return diffuse;
+}
+$("btnFlat").addEventListener("click", () => {
+  // 平面精灵：无高度图 → 源切 Alpha 距离场，同步到已知良好参数
+  $("convSrc").value = "alpha"; updateConvUI();
+  $("bevelW").value = "6"; $("bevelWv").textContent = "6";
+  $("bevelProfile").value = "smooth"; $("bevelFull").checked = false;
+  $("convOp").value = "sobel3"; $("convStrength").value = "1.2"; $("convStrengthv").textContent = "1.20";
+  $("convBlur").value = "0"; $("convBlurv").textContent = "0";
+  $("convEdge").value = "clamp"; $("convInvert").checked = false;
+  setDiffuse(makeFlatSample(), "示例·药水瓶");
+  state.height = null;                                 // 平面精灵没有高度图，清掉 Height 槽
+  clearSlot("slotHeight", "拖入 / 点击选择 PNG");
+  scheduleConvert();
 });
 
 /* 启动：直接载入示例，立即可玩 */
