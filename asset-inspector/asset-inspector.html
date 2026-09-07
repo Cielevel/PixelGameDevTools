@@ -2,10 +2,11 @@
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8">
-<title>素材处理与验收工具 · Asset Inspector</title>
+<title>静态像素工作台 · Chaos_0.1.0</title>
 <style>
   body { background:#14151f; color:#a1a3c0; font:13px/1.6 system-ui,sans-serif; margin:0; display:flex; flex-direction:column; height:100vh; }
   h1 { font-size:15px; color:#dfd9c3; margin:0; font-weight:600; }
+  h1 .ver { font-size:11px; font-weight:400; color:#8b90b0; margin-left:6px; letter-spacing:.5px; }
   h2 { font-size:12px; color:#dfd9c3; margin:14px 0 4px; font-weight:600; letter-spacing:.05em; }
   header { display:flex; gap:12px; align-items:center; padding:10px 16px; border-bottom:1px solid #4d4e6c; flex-wrap:wrap; }
   main { flex:1; display:grid; grid-template-columns:200px 1fr 360px; min-height:0; }
@@ -41,6 +42,8 @@
   th { color:#6d6f8f; font-weight:500; }
   td.num { text-align:right; font-variant-numeric:tabular-nums; }
   .sw { display:inline-block; width:14px; height:14px; border:1px solid #4d4e6c; vertical-align:-3px; }
+  .kpre { display:inline-block; width:18px; height:18px; border:1px solid #4d4e6c; cursor:pointer; }
+  .kpre.sel { outline:2px solid #4ed4e8; outline-offset:1px; }
   .ok { color:#7fd48a; } .no { color:#f8894b; }
   .kv { margin:0; } .kv b { color:#dfd9c3; font-weight:600; }
   .chips { display:flex; flex-wrap:wrap; gap:4px; margin-top:4px; }
@@ -49,13 +52,14 @@
   details { margin:4px 0; } summary { cursor:pointer; color:#dfd9c3; }
   .row { display:flex; gap:8px; align-items:center; margin:4px 0; flex-wrap:wrap; }
   footer { padding:6px 16px; border-top:1px solid #2c2d40; display:flex; gap:16px; }
-  #drop { outline:2px dashed #4ed4e8; outline-offset:-6px; }
+  footer .pixbeat { flex:1; min-width:0; display:block; margin-left:16px; align-self:center; opacity:.85; }
+  body.drop { outline:2px dashed #4ed4e8; outline-offset:-6px; }
   @media (max-width: 980px) { main { grid-template-columns:150px 1fr 300px; } }
 </style>
 </head>
 <body>
 <header>
-  <h1>素材处理与验收工具</h1>
+  <h1>静态像素工作台 <span class="ver">Chaos_0.1.0</span></h1>
   <button id="open">打开素材…</button>
   <button id="clear">清空队列</button>
   <input type="file" id="picker" multiple hidden
@@ -123,6 +127,12 @@
     <div id="chromaCtl" hidden>
       <div class="row"><button class="mini" id="pickKey">取键色</button>
         <span class="sw" id="keySw" style="background:#00b140"></span><span id="keyHex" class="note">未设置（自动取四角）</span></div>
+      <div class="row note">预设键色
+        <span class="kpre" data-k="#00b140" title="绿幕——数字素材首选，主体忌含绿" style="background:#00b140"></span>
+        <span class="kpre" data-k="#ff00ff" title="品红——离自然素材色最远，主体含绿/蓝均可，像素画透明惯例色" style="background:#ff00ff"></span>
+        <span class="kpre" data-k="#0047bb" title="蓝幕——主体含绿（植被/绿衣）时用，主体忌含蓝" style="background:#0047bb"></span>
+        <span class="kpre" data-k="#00ffff" title="青——主体全暖色调时用，主体忌含青/蓝绿" style="background:#00ffff"></span>
+        <span>（点击套用，或「取键色」点画面取任意色）</span></div>
       <div class="row">色度阈值 <input type="range" id="ckthr" min="0" max="120" value="28" style="width:110px"> <span id="ckthrv">28</span>
         软过渡 <input type="range" id="cksoft" min="0" max="80" value="16" style="width:90px"> <span id="cksoftv">16</span></div>
       <div class="row">去溢色 <input type="range" id="ckdespill" min="0" max="100" value="50" style="width:150px"> <span id="ckdespillv">50</span>%</div>
@@ -163,6 +173,7 @@
 </main>
 <footer>
   <span class="note">合规口径与 pixcli 一致：色数 = 不透明像素唯一 RGB（alpha=0 不计色）；alpha 两态 = 只含 0/255。</span>
+  <canvas id="pixbeat" class="pixbeat" hidden></canvas>
 </footer>
 <script>
 'use strict';
@@ -547,7 +558,8 @@ function removeBackground(id, tol = 16) {
  *  thr = 全透明色度距离；soft = 软过渡带宽（thr~thr+soft 之间 alpha 线性渐变，
  *  配合 alpha 两态化得到干净硬边）；despill 0..1 = 去溢色——键色主通道（G 幕压 G、
  *  B 幕压 B、R 幕压 R，主通道须显著占优才启用）在贴近键色的边缘带内压回另两通道
- *  的较大值（经典绿溢 G→max(R,B) 的推广；非键方向通道零改动）。
+ *  的较大值（经典绿溢 G→max(R,B) 的推广；非键方向通道零改动）；双高通道键
+ *  （品红 R≈B≫G、青 G≈B≫R）两通道超额一并向弱通道压回中性。
  *  未触碰像素逐字节原样保留——色数统计零漂移。返回 {width,height,data}。 */
 function chromaKeyImageData(id, key, thr = 28, soft = 16, despill = 0.5) {
   const w = id.width, h = id.height, src = id.data;
@@ -558,6 +570,7 @@ function chromaKeyImageData(id, key, thr = 28, soft = 16, despill = 0.5) {
   const reach = thr + band + 16;                        // 去溢色影响域：透明线外再延伸一程（保护中距离的合法近似绿）
   const sorted = [key[0], key[1], key[2]].sort((a, b) => b - a);
   const dom = sorted[0] - sorted[1] >= 30 ? key.indexOf(sorted[0]) : -1;   // 键色主通道（须显著占优）
+  const dual = dom < 0 && sorted[1] - sorted[2] >= 30 ? [0, 1, 2].filter(c => key[c] >= sorted[1]) : null;
   const out = new Uint8ClampedArray(src);
   for (let i = 0; i < src.length; i += 4) {
     const r = src[i], g = src[i + 1], b = src[i + 2];
@@ -568,11 +581,19 @@ function chromaKeyImageData(id, key, thr = 28, soft = 16, despill = 0.5) {
     else a = Math.round(255 * (d - thr) / band);
     if (a === 0) { out[i + 3] = 0; continue; }
     if (a !== src[i + 3]) out[i + 3] = a;
-    if (dom >= 0 && despill > 0 && d < reach) {
+    if (despill > 0 && d < reach && (dom >= 0 || dual)) {
       const wgt = (reach - d) / (reach - thr);          // 越贴近键色，溢色越重
-      const others = dom === 1 ? Math.max(r, b) : dom === 2 ? Math.max(r, g) : Math.max(g, b);
-      const v = src[i + dom];
-      if (v > others) out[i + dom] = Math.round(v - despill * wgt * (v - others));
+      if (dom >= 0) {                                   // 单主通道：压向另两通道较大值
+        const others = dom === 1 ? Math.max(r, b) : dom === 2 ? Math.max(r, g) : Math.max(g, b);
+        const v = src[i + dom];
+        if (v > others) out[i + dom] = Math.round(v - despill * wgt * (v - others));
+      } else {                                          // 双高通道：两通道超额一并向弱通道压回
+        const weak = [0, 1, 2].find(c => !dual.includes(c));
+        for (const c of dual) {
+          const v = src[i + c], o = src[i + weak];
+          if (v > o) out[i + c] = Math.round(v - despill * wgt * (v - o));
+        }
+      }
     }
   }
   return { width: w, height: h, data: out };
@@ -1275,6 +1296,8 @@ function init() {
   function renderKey() {
     $('keySw').style.background = keyColor || '#666';
     $('keyHex').textContent = keyColor ? keyColor + '（可重新取色）' : '未设置（自动取四角）';
+    const kc = (keyColor || '').toLowerCase();
+    document.querySelectorAll('.kpre').forEach(el => el.classList.toggle('sel', el.dataset.k === kc));
   }
   function autoKey() {          // 与自动去背景同起手：左上 2×2 均值
     const it = files[cur];
@@ -1319,6 +1342,12 @@ function init() {
   $('cksoft').onchange = updateProc;
   $('ckdespill').onchange = updateProc;
   $('pickKey').onclick = () => setPicking(!pickingKey);
+  document.querySelectorAll('.kpre').forEach(el => el.onclick = () => {
+    setPicking(false);          // 预设优先：退出取色模式
+    keyColor = el.dataset.k; store.ckkey = keyColor;
+    renderKey(); updateProc();
+    setStatus('键色 = ' + keyColor + '（已按色度距离重抠）');
+  });
   // 初始化（localStorage 持久化）
   $('bgmode').value = store.bgmode;
   $('ckthr').value = store.ckthr; $('ckthrv').textContent = $('ckthr').value;
@@ -1346,9 +1375,12 @@ function init() {
   };
 
   // 拖放
-  addEventListener('dragover', e => { e.preventDefault(); document.body.id = 'drop'; });
-  addEventListener('dragleave', () => { delete document.body.id; });
-  addEventListener('drop', e => { e.preventDefault(); delete document.body.id; if (e.dataTransfer.files.length) addFiles(e.dataTransfer.files); });
+  addEventListener('dragover', e => { e.preventDefault(); document.body.classList.add('drop'); });
+  addEventListener('dragleave', () => document.body.classList.remove('drop'));
+  addEventListener('drop', e => {
+    e.preventDefault(); document.body.classList.remove('drop');
+    if (e.dataTransfer.files.length) addFiles(e.dataTransfer.files);
+  });
 
   // 键盘
   addEventListener('keydown', e => {
@@ -1376,6 +1408,55 @@ const escapeHtml = s => String(s).replace(/[&<>"]/g, ch => ({ '&': '&amp;', '<':
 
 if (typeof document !== 'undefined' && document.getElementById('cv')) init();
 if (typeof module !== 'undefined' && module.exports) module.exports = { analyzeImageData, checkTiers, checkTile, checkScaleFit, verdict, hex6, mergeImageData, applyOutline, rgbToOklab, oklabDist2, detectGridImageData, downscaleImageData, quantizeImageData, removeBackground, chromaKeyImageData };
+
+// ── 右下角像素律动（纯装饰）：方块群沿对角波在明暗两色间呼吸；宽度弹性填满 footer 剩余空间，不参与任何验收逻辑 ──
+(function pixbeat() {
+  if (typeof document === 'undefined') return;          // node 侧直跑脚本做测试时不建 DOM
+  const cv = document.getElementById('pixbeat');
+  const ctx = cv && cv.getContext('2d');
+  if (!ctx) return;
+  const PITCH = 5, SQ = 4, ROWS = 4;                    // 方块 4px + 间隙 1px = 5px 格距（整数像素，任意 DPR 对齐）
+  const PAIRS = [                                        // 每格的明暗色对：青为主、灰蓝次之、少量暖米
+    [[16, 19, 31], [78, 212, 232]],
+    [[27, 28, 46], [90, 94, 133]],
+    [[42, 36, 24], [223, 217, 195]],
+  ];
+  let COLS = 0, cells = [], dpr = 1;
+  function rebuild() {                                   // 列数由 footer 实际剩余宽度算出，缩放/换窗随动
+    dpr = Math.max(1, window.devicePixelRatio || 1);
+    COLS = Math.max(1, Math.floor(cv.clientWidth / PITCH));
+    cells = [];
+    for (let y = 0; y < ROWS; y++) for (let x = 0; x < COLS; x++) {
+      const r = ((x + 1) * 73856093 ^ (y + 1) * 19349663) >>> 0;   // 确定性：每格相位/速度/色对固定
+      const m = r % 10;
+      cells.push({
+        pair: PAIRS[m < 7 ? 0 : m < 9 ? 1 : 2],
+        phase: (r % 628) / 100,
+        speed: 0.9 + (r % 7) / 7 * 0.5,
+      });
+    }
+    cv.width = COLS * PITCH * dpr; cv.height = ROWS * PITCH * dpr;
+    cv.style.height = ROWS * PITCH + 'px';               // 宽度交给 flex 布局，不在此设
+    cv.hidden = false;
+  }
+  const smooth = s => { s = Math.min(1, Math.max(0, (s - 0.18) / 0.64)); return s * s * (3 - 2 * s); };  // 两端多停留，中段快过渡
+  function draw(t) {
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, COLS * PITCH, ROWS * PITCH);
+    for (let y = 0; y < ROWS; y++) for (let x = 0; x < COLS; x++) {
+      const c = cells[y * COLS + x];
+      const s = smooth(0.5 + 0.5 * Math.sin(t * c.speed + c.phase + (x + y) * 0.34));  // 对角波（系数随格距等比缩，保持每像素节奏不变）+ 每格相位差
+      const a = c.pair[0], b = c.pair[1];
+      ctx.fillStyle = 'rgb(' + Math.round(a[0] + (b[0] - a[0]) * s) + ',' + Math.round(a[1] + (b[1] - a[1]) * s) + ',' + Math.round(a[2] + (b[2] - a[2]) * s) + ')';
+      ctx.fillRect(x * PITCH, y * PITCH, SQ, SQ);        // 方块贴格左上，右/下各留 1px 间隙（整像素不虚边）
+    }
+  }
+  const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  if ('ResizeObserver' in window) new ResizeObserver(() => { rebuild(); if (reduced) draw(0); }).observe(cv);
+  rebuild();
+  if (reduced) { draw(0); return; }                      // 减弱动效：只画静态一帧
+  (function loop(ts) { draw(ts / 1000); requestAnimationFrame(loop); })(0);
+}());
 </script>
 </body>
 </html>
