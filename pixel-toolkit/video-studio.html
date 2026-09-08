@@ -360,7 +360,8 @@ function oklabDist2(a, b) { const dL = a[0]-b[0], da = a[1]-b[1], db = a[2]-b[2]
 
 /* 幕色抠像与 pixel-toolkit/video.py 两段口径对齐：
    检测（auto）＝四角众数 + 主通道增益判定（同 detect_green_screen/is_greenish，不含 40 阈差；
-   众数使单角被主体遮挡/带噪时不稀释判定）；抠像＝主通道占优 + 阈差 40（同 chroma_key 逐字节同条件）。
+   众数使单角被主体遮挡/带噪时不稀释判定）；抠像＝主通道占优 + 阈差 40（同 chroma_key 逐字节同条件），
+   外加一道 KEY_TESTS_WEAK 连通生长的边缘残留清除（video.py 暂无此级，见 chromaKey 注释）。
    品红/蓝/青按同形「主通道占优」推广——双主通道键（品红 R≈B≫G、青 G≈B≫R）两主通道均须占优 */
 const KEY_TESTS = {
   green:   (r,g,b) => g > 60 && g > r*1.1 && g > b*1.1 && (g-r) > 40 && (g-b) > 40,
@@ -373,6 +374,12 @@ const KEY_DETECT = {   // 检测口径：只看主通道增益（video.py is_gre
   magenta: (r,g,b) => r > 60 && b > 60 && r > g*1.1 && b > g*1.1,
   blue:    (r,g,b) => b > 60 && b > r*1.1 && b > g*1.1,
   cyan:    (r,g,b) => g > 60 && b > 60 && g > r*1.1 && b > r*1.1,
+};
+const KEY_TESTS_WEAK = {   // 边界残留清除用弱判定（余量放宽：阈差 12 / 增益 1.05 / 下限 48）
+  green:   (r,g,b) => g > 48 && g > r*1.05 && g > b*1.05 && (g-r) > 12 && (g-b) > 12,
+  magenta: (r,g,b) => r > 48 && b > 48 && r > g*1.05 && b > g*1.05 && (r-g) > 12 && (b-g) > 12,
+  blue:    (r,g,b) => b > 48 && b > r*1.05 && b > g*1.05 && (b-r) > 12 && (b-g) > 12,
+  cyan:    (r,g,b) => g > 48 && b > 48 && g > r*1.05 && b > r*1.05 && (g-r) > 12 && (b-r) > 12,
 };
 function detectKey(id) {   // 四角众数落在哪种幕色（绿优先，向后兼容旧素材口径）
   const px = (x,y) => { const i=(y*id.width+x)*4; return [id.data[i],id.data[i+1],id.data[i+2]]; };
@@ -388,42 +395,71 @@ function detectKey(id) {   // 四角众数落在哪种幕色（绿优先，向�
 }
 /* 自由取色：任意键色 → 与四预设完全同形的「主通道占优」判定。
    通道差 ≥30 定结构（单主通道=绿/蓝型，双主通道=品红/青型）；四预设色代入可逐字节复现对应预设。
+   缺省余量 = 主判定（阈差 40 / 增益 1.1 / 下限 60）；传 (12, 1.05, 48) 得边界清除用弱判定。
    低饱和（主通道不显著）返回 null——与只比色品不比明度的口径冲突，会误伤主体灰暗部。 */
-function testFromRGB(r, g, b) {
+function testFromRGB(r, g, b, gap = 40, gain = 1.1, floor = 60) {
   const v = [r, g, b];
   const idx = [0, 1, 2].sort((a, c) => v[c] - v[a]);
   let dom;
   if (v[idx[0]] - v[idx[1]] >= 30) dom = [idx[0]];
   else if (v[idx[1]] - v[idx[2]] >= 30) dom = [idx[0], idx[1]];
   else return null;
-  const weak = [0, 1, 2].filter(i => !dom.includes(i));
+  const weakCh = [0, 1, 2].filter(i => !dom.includes(i));
   return (pr, pg, pb) => {
     const p = [pr, pg, pb];
-    return dom.every(d => p[d] > 60 && weak.every(w => p[d] > p[w] * 1.1 && (p[d] - p[w]) > 40));
+    return dom.every(d => p[d] > floor && weakCh.every(w => p[d] > p[w] * gain && (p[d] - p[w]) > gap));
   };
 }
-let CUSTOM_TEST = null;    // custom 模式的键色判定（取色后由 testFromRGB 生成）
-let pickingKey = false;    // 取键色模式：点击预览画面读原始帧像素
+let CUSTOM_TEST = null;      // custom 模式的键色主判定（取色后由 testFromRGB 生成）
+let CUSTOM_TEST_WEAK = null; // custom 模式的键色弱判定（边缘残留清除用）
+let pickingKey = false;      // 取键色模式：点击预览画面读原始帧像素
 let pickFrame = null;      // 取色时展示的原始帧（按需从 video 元素现抓，不整包驻留内存）
-function chromaKey(id, test) {   // 判定 test(r,g,b) 命中 → 透明（与视频标准化口径一致）
+function chromaKey(id, test, weakTest) {   // 主判定命中 → 透明（与视频标准化口径一致）
   if (!test) return id;
   const d = new Uint8ClampedArray(id.data), w = id.width, h = id.height;
   for (let i = 0; i < d.length; i += 4) {
     if (d[i+3] && test(d[i], d[i+1], d[i+2])) { d[i]=d[i+1]=d[i+2]=0; d[i+3]=0; }
   }
+  if (weakTest) {
+    /* 边缘残留清除：4:2:0 色度采样 + 帧间压缩在轮廓处留下 1~5px「幕色↔主体」混色过渡带，
+       这些像素的值贴着主阈值分布且逐帧漂移 → 幕色残留边 + 边缘闪烁（实测蓝幕样片每帧约
+       1200 个可清除带像素、输出端 24 帧 1098 个可见偏蓝边界格）。用放宽余量的弱判定从已
+       透明区连通生长（每轮 1px、先标记后杀保证确定性，≤4 轮覆盖过渡带），吃到实色主体为止；
+       连通约束保证主体内部同色像素不被波及。 */
+    const mark = new Uint8Array(w * h);
+    for (let round = 0; round < 4; round++) {
+      let changed = false;
+      for (let y = 0; y < h; y++) {
+        const row = y * w;
+        for (let x = 0; x < w; x++) {
+          const p = row + x, i = p * 4;
+          if (!d[i+3]) continue;
+          const nearTrans = (x > 0 && !d[i-4+3]) || (x < w-1 && !d[i+4+3]) ||
+                            (y > 0 && !d[i-w*4+3]) || (y < h-1 && !d[i+w*4+3]);
+          if (nearTrans && weakTest(d[i], d[i+1], d[i+2])) { mark[p] = 1; changed = true; }
+        }
+      }
+      if (!changed) break;
+      for (let p = 0; p < mark.length; p++) {
+        if (!mark[p]) continue;
+        const i = p * 4; d[i]=d[i+1]=d[i+2]=0; d[i+3]=0;
+      }
+    }
+  }
   return { width:w, height:h, data:d };
 }
 function keyApply(id, mode) {           // auto → 四角检测幕色；强制 → 所选幕色；custom → 取色判定
-  let test = KEY_TESTS[mode];
-  if (mode === 'auto') { const k = detectKey(id); test = k ? KEY_TESTS[k] : null; }
-  else if (mode === 'custom') test = CUSTOM_TEST;
-  return test ? chromaKey(id, test) : id;
+  let test = KEY_TESTS[mode], weakTest = KEY_TESTS_WEAK[mode];
+  if (mode === 'auto') { const k = detectKey(id); test = k ? KEY_TESTS[k] : null; weakTest = k ? KEY_TESTS_WEAK[k] : null; }
+  else if (mode === 'custom') { test = CUSTOM_TEST; weakTest = CUSTOM_TEST_WEAK; }
+  return test ? chromaKey(id, test, weakTest) : id;
 }
 function setCustomKey(rgb) {            // 设置自由键色：推导判定 + 更新 UI + 标脏（点「▶ 处理」生效）
   const test = testFromRGB(rgb[0], rgb[1], rgb[2]);
   const hex = '#' + rgb.map(c => c.toString(16).padStart(2, '0')).join('');
   if (!test) { setStatus(`键色 ${hex} 主通道不显著（低饱和色），无法按主通道口径抠像`, true); return false; }
   CUSTOM_TEST = test;
+  CUSTOM_TEST_WEAK = testFromRGB(rgb[0], rgb[1], rgb[2], 12, 1.05, 48);
   $('keyColor').value = hex; $('keyHex').textContent = hex + '（可重新取色/选色）';
   onParamChange('keyColor');            // 只标脏（选色器拖动不刷屏，处理按钮一键应用）
   return true;
