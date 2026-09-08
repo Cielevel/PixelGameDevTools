@@ -302,6 +302,34 @@ th,td { padding:3px 6px; text-align:left; }
       </div>
     </fieldset>
 
+    <fieldset aria-label="后处理（可选）"><div class="cap">后处理（可选）</div>
+      <div class="field">
+        <div class="row"><label>色阶分配</label>
+          <select id="assign">
+            <option value="nearest">逐像素最近色</option>
+            <option value="region:0.03">区域众数·细</option>
+            <option value="region:0.05">区域众数·中</option>
+            <option value="region:0.08">区域众数·粗</option>
+          </select>
+        </div>
+      </div>
+      <div class="field">
+        <div class="row"><label>平涂</label>
+          <select id="flat"><option value="0">关</option><option value="1">3×3 中值</option><option value="2">5×5 中值</option></select>
+        </div>
+      </div>
+      <div class="field">
+        <div class="row"><label>孤立像素</label><input type="checkbox" id="orphan"><span class="unit">清除</span></div>
+      </div>
+      <div class="field">
+        <div class="row"><label>时间稳定</label>
+          <select id="tstab"><option value="0">关</option><option value="3">3 帧众数</option><option value="5">5 帧众数</option></select>
+        </div>
+      </div>
+      <div class="hint">区域众数＝先按连续色分区、再整体取色阶，边界更干净（需「目标色数」&gt; 0）</div>
+      <div class="hint">平涂/孤立像素/时间稳定默认全关＝当前风格；改色阶分配只需重跑量化、不重抽帧</div>
+    </fieldset>
+
   </section>
 
   <!-- 中：预览 -->
@@ -601,6 +629,243 @@ function mapToPalette(id, pal) {  // pal: [[r,g,b],...]
   return { width:w, height:h, data:d };
 }
 
+/* 区域众数色阶分配（可选，替代逐像素最近色）：先在连续色域做区域生长
+   （4 邻、与种子色 OKLab 距离 ≤ sim），再按「逐像素最近色」的票数对每个区域整体定色。
+   连续色域分区比量化后合并更能保住平涂块与干净边界；sim 过大则吞掉色阶细节。 */
+function mapToPaletteRegions(f, pal, sim) {
+  const w = f.width, h = f.height, d = f.data, np = w*h, P = pal.length;
+  const out = new Uint8ClampedArray(d);
+  const lab = new Float32Array(np*3);
+  const vote = new Int32Array(np);
+  const palLab = new Float32Array(P*3);
+  for (let j = 0; j < P; j++) {
+    const L = rgbToOklab(pal[j][0], pal[j][1], pal[j][2]);
+    palLab[j*3] = L[0]; palLab[j*3+1] = L[1]; palLab[j*3+2] = L[2];
+  }
+  // ① 每像素 OKLab + 最近色投票（与 mapToPalette 同口径，作为区域定色的票）
+  for (let p = 0; p < np; p++) {
+    const i = p << 2;
+    if (!d[i+3]) continue;
+    const L = rgbToOklab(d[i], d[i+1], d[i+2]);
+    const l0 = L[0], l1 = L[1], l2 = L[2];
+    lab[p*3] = l0; lab[p*3+1] = l1; lab[p*3+2] = l2;
+    let bi = 0, bd = Infinity;
+    for (let j = 0; j < P; j++) {
+      const dl = l0 - palLab[j*3], da = l1 - palLab[j*3+1], db = l2 - palLab[j*3+2];
+      const dd = dl*dl + da*da + db*db;
+      if (dd < bd) { bd = dd; bi = j; }
+    }
+    vote[p] = bi;
+  }
+  // ② 区域生长（4 邻，只在不透明像素间；以种子色为基准，避免逐格漂移）
+  const label = new Int32Array(np).fill(-1);
+  const head = new Int32Array(np).fill(-1), next = new Int32Array(np).fill(-1);
+  const stack = new Int32Array(np);
+  const sim2 = sim * sim;
+  let nl = 0;
+  for (let s = 0; s < np; s++) {
+    if (label[s] >= 0 || !d[(s<<2)+3]) continue;
+    const sl = s*3, l0 = lab[sl], l1 = lab[sl+1], l2 = lab[sl+2];
+    let sp = 0; stack[sp++] = s; label[s] = nl;
+    while (sp > 0) {
+      const p = stack[--sp];
+      next[p] = head[nl]; head[nl] = p;          // 入区域链表（供 ③ 遍历）
+      const x = p % w, y = (p / w) | 0;
+      for (let k = 0; k < 4; k++) {
+        let q;
+        if (k === 0) { if (y === 0) continue; q = p - w; }
+        else if (k === 1) { if (y === h-1) continue; q = p + w; }
+        else if (k === 2) { if (x === 0) continue; q = p - 1; }
+        else { if (x === w-1) continue; q = p + 1; }
+        if (label[q] >= 0 || !d[(q<<2)+3]) continue;
+        const ql = q*3;
+        const dl = l0 - lab[ql], da = l1 - lab[ql+1], db = l2 - lab[ql+2];
+        if (dl*dl + da*da + db*db <= sim2) { label[q] = nl; stack[sp++] = q; }
+      }
+    }
+    nl++;
+  }
+  // ③ 每区域按票数众数定色（平局取链表先出现者，确定性）
+  const scratch = new Int32Array(P), rcol = new Int32Array(nl);
+  for (let r = 0; r < nl; r++) {
+    scratch.fill(0);
+    let best = 0, bn = -1;
+    for (let p = head[r]; p >= 0; p = next[p]) {
+      const c = ++scratch[vote[p]];
+      if (c > bn) { bn = c; best = vote[p]; }
+    }
+    rcol[r] = best;
+  }
+  // ④ 整区域填色（alpha 沿用原帧，不改轮廓）
+  for (let p = 0; p < np; p++) {
+    const i = p << 2;
+    if (!d[i+3]) continue;
+    const c = pal[rcol[label[p]]];
+    out[i] = c[0]; out[i+1] = c[1]; out[i+2] = c[2];
+  }
+  return { width: w, height: h, data: out };
+}
+/* 基础帧生成：nearest = 旧口径逐像素最近色；region:<sim> = 区域众数。
+   两者只依赖降采样帧 + 共享色板，故缓存的 raw 可复用（改此项不重抽帧）。 */
+function assignBase(frames, pal, mode) {
+  if (!pal || !pal.length) return frames;   // 未量化：无赋值可言
+  if (!mode || mode === 'nearest') return frames.map(f => mapToPalette(f, pal));
+  const sim = +mode.slice(7) || 0.05;       // 'region:0.05' → 0.05
+  return frames.map(f => mapToPaletteRegions(f, pal, sim));
+}
+
+/* ═══ 后处理（可选）：默认全关 = 与旧管线逐位一致，只作用于已量化帧 ═══
+   固定顺序：平涂 → 孤立像素清除 → 时间稳定 → 描边（描边必须最后，否则描边自身会闪） */
+
+function insSort(a, n) {   // 小数组插入排序（n ≤ 25）：逐像素中值不分配临时数组
+  for (let i = 1; i < n; i++) {
+    const v = a[i]; let j = i - 1;
+    while (j >= 0 && a[j] > v) { a[j+1] = a[j]; j--; }
+    a[j+1] = v;
+  }
+}
+/* 平涂：邻域逐通道中值 → 吸附回共享色板（不引入新色），抹平采样造成的麻点。
+   邻域不透明像素不足一半时原样保留——细线/细腿不会被窗口吃掉。 */
+function flattenColors(f, r, pal) {
+  if (!pal || !pal.length) return f;         // 未量化：无稳定色集可吸附（hint 已说明）
+  const w = f.width, h = f.height, src = f.data;
+  const out = new Uint8ClampedArray(src);
+  const cap = (2*r+1)*(2*r+1), need = (cap >> 1) + 1;
+  const cr = new Int32Array(cap), cg = new Int32Array(cap), cb = new Int32Array(cap);
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+    const i = (y*w+x)*4;
+    if (!src[i+3]) continue;
+    const y0 = Math.max(0, y-r), y1 = Math.min(h-1, y+r);
+    const x0 = Math.max(0, x-r), x1 = Math.min(w-1, x+r);
+    let n = 0;
+    for (let yy = y0; yy <= y1; yy++) for (let xx = x0; xx <= x1; xx++) {
+      const j = (yy*w+xx)*4;
+      if (src[j+3]) { cr[n] = src[j]; cg[n] = src[j+1]; cb[n] = src[j+2]; n++; }
+    }
+    if (n < need) continue;
+    insSort(cr, n); insSort(cg, n); insSort(cb, n);
+    const m = n >> 1, mr = cr[m], mg = cg[m], mb = cb[m];
+    let bi = 0, bd = Infinity;
+    for (let p = 0; p < pal.length; p++) {
+      const dr = mr - pal[p][0], dg = mg - pal[p][1], db = mb - pal[p][2];
+      const dd = dr*dr + dg*dg + db*db;
+      if (dd < bd) { bd = dd; bi = p; }
+    }
+    out[i] = pal[bi][0]; out[i+1] = pal[bi][1]; out[i+2] = pal[bi][2];
+  }
+  return { width: w, height: h, data: out };
+}
+/* 孤立像素清除：与四邻颜色全不同者 → 取四邻众数色（平局取先出现者，确定性）。
+   无同色邻居才算孤立；无任何不透明邻居（单像素）时保持原样。 */
+function removeOrphans(f) {
+  const w = f.width, h = f.height, src = f.data;
+  const out = new Uint8ClampedArray(src);
+  const nb = new Int32Array(4);
+  for (let y = 1; y < h-1; y++) for (let x = 1; x < w-1; x++) {
+    const i = (y*w+x)*4;
+    if (!src[i+3]) continue;
+    const c = (src[i]<<16) | (src[i+1]<<8) | src[i+2];
+    nb[0] = (y-1)*w+x; nb[1] = (y+1)*w+x; nb[2] = y*w+x-1; nb[3] = y*w+x+1;
+    let same = false;
+    for (let t = 0; t < 4; t++) {
+      const j = nb[t]*4;
+      if (src[j+3] && (((src[j]<<16)|(src[j+1]<<8)|src[j+2]) === c)) { same = true; break; }
+    }
+    if (same) continue;
+    let best = -1, bn = 0;
+    for (let t = 0; t < 4; t++) {
+      const j = nb[t]*4;
+      if (!src[j+3]) continue;
+      const n = (src[j]<<16)|(src[j+1]<<8)|src[j+2];
+      let cnt = 0;
+      for (let q = 0; q < 4; q++) {
+        const jq = nb[q]*4;
+        if (src[jq+3] && (((src[jq]<<16)|(src[jq+1]<<8)|src[jq+2]) === n)) cnt++;
+      }
+      if (cnt > bn) { bn = cnt; best = n; }
+    }
+    if (best >= 0) { out[i] = (best>>16)&255; out[i+1] = (best>>8)&255; out[i+2] = best&255; }
+  }
+  return { width: w, height: h, data: out };
+}
+/* 时间稳定：窗口内逐像素取众数（颜色索引，透明态 -1 也参与投票），平局保留当前帧。
+   同时稳 alpha 与颜色——只稳颜色的话轮廓边缘仍会闪。 */
+async function temporalStabilize(frames, win, token) {
+  const n = frames.length, r = win >> 1;
+  if (n < 2 || r < 1) return frames;
+  const w = frames[0].width, h = frames[0].height, np = w*h;
+  const seq = frames.map(f => {
+    const d = f.data, a = new Int32Array(np);
+    for (let p = 0, i = 0; p < np; p++, i += 4) a[p] = d[i+3] ? ((d[i]<<16)|(d[i+1]<<8)|d[i+2]) : -1;
+    return a;
+  });
+  const vals = new Int32Array(win), cnts = new Int32Array(win);
+  const out = [];
+  for (let k = 0; k < n; k++) {
+    if (token !== jobToken) throw new Error('aborted');
+    const lo = Math.max(0, k-r), hi = Math.min(n-1, k+r);
+    const cur = seq[k];
+    const d = new Uint8ClampedArray(frames[k].data);
+    for (let p = 0; p < np; p++) {
+      let m = 0;
+      for (let t = lo; t <= hi; t++) {
+        const v = seq[t][p];
+        let q = 0;
+        for (; q < m; q++) if (vals[q] === v) { cnts[q]++; break; }
+        if (q === m) { vals[m] = v; cnts[m] = 1; m++; }
+      }
+      let best = cur[p], bn = 0;
+      for (let q = 0; q < m; q++) if (cnts[q] > bn) { bn = cnts[q]; best = vals[q]; }
+      for (let q = 0; q < m; q++) if (vals[q] === cur[p] && cnts[q] === bn) { best = cur[p]; break; }
+      if (best === cur[p]) continue;
+      const i = p << 2;
+      if (best < 0) d[i+3] = 0;
+      else { d[i] = (best>>16)&255; d[i+1] = (best>>8)&255; d[i+2] = best&255; d[i+3] = 255; }
+    }
+    out.push({ width: w, height: h, data: d });
+    if (k % 24 === 23) { setStatus(`时间稳定 ${k + 1}/${n}…`); await yieldUI(); }
+  }
+  return out;
+}
+/* 1px 描边（从 buildLibrary 抽出）：4 邻不透明判定，写 alpha 边界像素 */
+function drawOutline(f, oc) {
+  const w = f.width, h = f.height;
+  const d = new Uint8ClampedArray(f.data);
+  const op = (x, y) => x >= 0 && y >= 0 && x < w && y < h && d[(y*w+x)*4+3] >= 128;
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+    const i = (y*w+x)*4;
+    if (d[i+3] >= 128 && (!op(x-1,y) || !op(x+1,y) || !op(x,y-1) || !op(x,y+1))) {
+      d[i] = oc[0]; d[i+1] = oc[1]; d[i+2] = oc[2];
+    }
+  }
+  return { width: w, height: h, data: d };
+}
+/* 后处理编排：全关时只走描边 = 旧管线末尾行为 */
+async function applyPost(frames, pal, token) {
+  const flat = +$('flat').value || 0;
+  const orphan = $('orphan').checked;
+  const win = +$('tstab').value || 0;
+  const steps = [];
+  if (flat > 0) steps.push(f => flattenColors(f, flat, pal));
+  if (orphan) steps.push(removeOrphans);
+  let out = frames;
+  for (const step of steps) {
+    const next = [];
+    for (let i = 0; i < out.length; i++) {
+      if (token !== jobToken) throw new Error('aborted');
+      next.push(step(out[i]));
+      if (i % 24 === 23) { setStatus(`空间清理 ${i + 1}/${out.length}…`); await yieldUI(); }
+    }
+    out = next;
+  }
+  if (win > 1) out = await temporalStabilize(out, win, token);
+  if ($('outline').checked) {
+    const oc = hexToRgb($('outlineColor').value);
+    out = out.map(f => drawOutline(f, oc));
+  }
+  return out;
+}
+
 /* 数据统计（updateStats 用：单遍扫描同时取色数与 alpha 两态，长帧序列选轨不卡顿） */
 function analyzeId(id) {
   const d=id.data, cols=new Map(); let alphaTwo=true;
@@ -612,7 +877,9 @@ function analyzeId(id) {
 /* ═══════════════ UI 层 ═══════════════ */
 /* V.tracks：每轨道 = 源视频一段区间，持有自己的 raw/processed 帧缓存与独立播放状态；
    区间允许任意重叠，主预览跟随「聚焦」轨道，每轨道缩略图独立播放 */
-const V = { video:null, url:null, dur:0, tracks:[], activeTrack:0, lib:null, paramGen:0, trackSeq:0, trackUnit:'time' };
+const V = { video:null, url:null, dur:0, tracks:[], activeTrack:0, lib:null, paramGen:0, postGen:0, trackSeq:0, trackUnit:'time' };
+/* 后处理参数：只重跑量化/清理、不改采样——改动时无需重抽帧（复用 V.lib.raw 重跑即可） */
+const POST_IDS = new Set(['assign','flat','orphan','tstab']);
 
 function setStatus(msg, err) { $('status').textContent = msg; $('status').style.color = err ? 'var(--warn)' : 'var(--sub)'; }
 
@@ -710,8 +977,8 @@ function trackFrameTime(T, j) { return T.t0 + (j + 0.5) * (T.t1 - T.t0) / trackF
    轨道区间只是素材上的裁剪引用——预览/播放/导出按 新时刻 → 素材覆盖 重映射帧号，
    区间调整永远即时生效、直接导出，无需重处理 ─── */
 function libFrames() { return V.lib && V.lib.processed && V.lib.processed.length ? V.lib.processed : null; }
-function libStale() {   // 素材需重建：未处理 / 帧率变了 / 处理参数变了（区间调整不影响素材）
-  return !V.lib || fpsValue() !== V.lib.covFps || V.lib.prGen !== V.paramGen;
+function libStale() {   // 素材需重建：未处理 / 帧率变了 / 采样参数变了 / 后处理参数变了（区间调整不影响素材）
+  return !V.lib || fpsValue() !== V.lib.covFps || V.lib.prGen !== V.paramGen || V.lib.poGen !== V.postGen;
 }
 function frameIdxAt(time) {   // 时刻 → 素材帧号（超出覆盖定格首/末帧）
   const lib = libFrames();
@@ -936,7 +1203,10 @@ function frameToImageData(src) {
    内存上只保留处理后的 64×64 级帧，原始帧即抓即弃：
    ① 采样 ≤32 帧取全片抠像 bbox 并集 → 固定参考框（帧间共享裁剪窗 → 主体位置稳定）；
    ② 逐帧 seek → 抓帧 → 抠像 → 裁剪 → 降采样 → 质量池累积；
-   ③ 跨帧共享色板量化 + 描边（对齐 video.py：量化在降采样后，描边占 1 个色数配额）。 --- */
+   ③ 跨帧共享色板量化 → 基础帧（对齐 video.py：量化在降采样后，描边占 1 个色数配额）；
+   返回 { raw, pal }：raw = 降采样帧（量化输入），pal = 共享色板。
+   ④ 由 assignBase（逐像素/区域众数）→ applyPost（空间清理/时间稳定/描边）收尾。
+   raw + pal 缓存在 V.lib：改色阶分配/后处理参数时免重抽帧，直接重跑（毫秒级）。 --- */
 async function buildLibrary(token) {
   const v = V.video; if (!v) return [];
   const fps = fpsValue();
@@ -983,24 +1253,15 @@ async function buildLibrary(token) {
   }
   if (!raw64.length) return [];
 
-  // ③ 跨帧共享色板量化 + 描边
-  const outline = $('outline').checked, ocol = $('outlineColor').value;
-  let out = raw64;
+  // ③ 跨帧共享色板量化 → 基础帧（后处理的输入；描边放到 ④ 之后，避免描边自身闪烁）
+  const outline = $('outline').checked;
+  let pal = [];
   if (k > 0) {
     const items = Array.from(pooled, ([k2,n2]) => [(k2>>16)&255,(k2>>8)&255,k2&255,n2]);
     const kk = Math.max(1, k - (outline?1:0));
-    const pal = items.length ? buildPaletteK(items, Math.min(kk, items.length)) : [];
-    out = raw64.map(f => pal.length ? mapToPalette(f, pal) : f);
+    pal = items.length ? buildPaletteK(items, Math.min(kk, items.length)) : [];
   }
-  if (outline) {
-    const oc = hexToRgb(ocol);
-    out = out.map(f => { const d = new Uint8ClampedArray(f.data), w=f.width,h=f.height;
-      const op=(x,y)=> x>=0&&y>=0&&x<w&&y<h&&d[(y*w+x)*4+3]>=128;
-      for (let y=0;y<h;y++) for (let x=0;x<w;x++){ const i=(y*w+x)*4;
-        if (d[i+3]>=128 && (!op(x-1,y)||!op(x+1,y)||!op(x,y-1)||!op(x,y+1))) { d[i]=oc[0];d[i+1]=oc[1];d[i+2]=oc[2]; } }
-      return { width:w, height:h, data:d }; });
-  }
-  return out;
+  return { raw: raw64, pal };   // ④ 色阶分配 + 后处理 + 描边由 processAllTracks 收尾
 }
 
 function hexToRgb(h) { return [parseInt(h.slice(1,3),16), parseInt(h.slice(3,5),16), parseInt(h.slice(5,7),16)]; }
@@ -1318,10 +1579,22 @@ async function processAllTracks() {
   try {
     stopAllTracks();
     await yieldUI();
-    setStatus('标准化中…'); await yieldUI();
-    const processed = await buildLibrary(token);
+    // 仅色阶分配/后处理参数变了 → 复用已缓存降采样帧，免重新 seek 视频（两种风格瞬时对比）
+    const reuse = V.lib && V.lib.raw && V.lib.raw.length && V.lib.prGen === V.paramGen && V.lib.covFps === fpsValue();
+    let libData;
+    if (reuse) {
+      setStatus('应用后处理…'); await yieldUI();
+      libData = { raw: V.lib.raw, pal: V.lib.pal };
+    } else {
+      setStatus('标准化中…'); await yieldUI();
+      libData = await buildLibrary(token);
+    }
+    const assignMode = $('assign').value;
+    const base = (reuse && V.lib.base && V.lib.assignMode === assignMode)
+      ? V.lib.base : assignBase(libData.raw, libData.pal, assignMode);
+    const processed = await applyPost(base, libData.pal, token);
     if (!processed.length) { setStatus('未抽到帧（检查视频时长/帧率）', true); return; }
-    V.lib = { processed, cov0: 0, cov1: V.dur, covFps: fpsValue(), prGen: V.paramGen };
+    V.lib = { raw: libData.raw, pal: libData.pal, base, assignMode, processed, cov0: 0, cov1: V.dur, covFps: fpsValue(), prGen: V.paramGen, poGen: V.postGen };
     V.tracks.forEach(tr => { tr.playT = clamp(tr.playT, tr.t0, tr.t1); tr.fidx = frameIdxAt(tr.playT); });
     afterProcess();
   } catch (e) {
@@ -1394,9 +1667,10 @@ function stopTrack(tr) {
 }
 function stopAllTracks() { V.tracks.forEach(stopTrack); }
 
-/* ─── 参数变化 → 全部轨道需重处理（标黄），点「▶ 处理」统一应用；覆盖内拖拽区间实时重映射，不算过期 ─── */
+/* ─── 参数变化 → 采样参数变了要重抽帧；后处理参数只重跑清理（复用 base，毫秒级）；
+   点「▶ 处理」统一应用；覆盖内拖拽区间实时重映射，不算过期 ─── */
 function onParamChange(id) {
-  V.paramGen++;
+  if (POST_IDS.has(id)) V.postGen++; else V.paramGen++;
   syncIndicator();
 }
 
@@ -1512,7 +1786,8 @@ function init() {
   });
 
   // 处理参数：改动使全量素材过期（黄色像素团），点「▶ 处理」重新生成；区间调整不在此列（实时重映射）
-  ['fps','ow','oh','cw','ch','dx','dy','colors','fit','outline','outlineColor','key'].forEach(id => {
+  // assign/flat/orphan/tstab = 色阶分配与后处理参数：只重跑量化/清理、不重抽帧（onParamChange 按 POST_IDS 分流）
+  ['fps','ow','oh','cw','ch','dx','dy','colors','fit','outline','outlineColor','key','assign','flat','orphan','tstab'].forEach(id => {
     $(id).addEventListener('input', () => { onParamChange(id); if (id === 'fps') refreshTrackDisplay(); });
   });
 
