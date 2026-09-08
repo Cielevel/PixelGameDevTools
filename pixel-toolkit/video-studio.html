@@ -274,6 +274,10 @@ th,td { padding:3px 6px; text-align:left; }
         <div class="row"><label>等比保形</label><input type="checkbox" id="fit" checked><span class="unit">contain（居中留边）</span></div>
       </div>
       <div class="field">
+        <div class="row"><label>原生网格</label><input type="checkbox" id="grid"><span class="unit">检测并逐格采样</span></div>
+        <div class="hint" id="gridInfo">未启用；开启后按源图原生像素网格采样（需源存在稳定网格）</div>
+      </div>
+      <div class="field">
         <div class="row"><label>主体位置</label><span class="unit">X</span><input type="number" id="dx" min="-99" max="99" value="0"><span class="unit">Y</span><input type="number" id="dy" min="-99" max="99" value="0"></div>
         <div class="row sub">
           <button class="mini pad" id="mvL" title="左移 1px">←</button>
@@ -538,6 +542,158 @@ function placeOnCanvas(img, cw, ch, dx, dy) {
     out[j]=img.data[i]; out[j+1]=img.data[i+1]; out[j+2]=img.data[i+2]; out[j+3]=255;
   }
   return { width:cw, height:ch, data:out };
+}
+
+/* ═══ 原生网格重采样（可选）：检测源图像素网格（周期 + 相位）→ 逐格中心采样。
+   固定比例的盒式降采样若与源网格不同相位，每格都在混 2–4 个源块 + 抗锯齿边缘，
+   形成混色与拍频；按网格对齐采样可消掉这一层噪声。
+   周期判据：真网格周期在 X/Y 两轴的功率谱上同时显著（纹理特征不会两轴同周期），
+   取两轴谱功率的几何平均找峰——比单轴取最强峰稳得多（实测源 峰/中位 23.3，噪声仅 6.3）。 ═══ */
+
+/* 就地 radix-2 FFT（长度须为 2 的幂） */
+function fft1d(re, im) {
+  const n = re.length;
+  for (let i = 1, j = 0; i < n; i++) {
+    let bit = n >> 1;
+    for (; j & bit; bit >>= 1) j ^= bit;
+    j ^= bit;
+    if (i < j) { let t = re[i]; re[i] = re[j]; re[j] = t; t = im[i]; im[i] = im[j]; im[j] = t; }
+  }
+  for (let len = 2; len <= n; len <<= 1) {
+    const ang = -2 * Math.PI / len, wr = Math.cos(ang), wi = Math.sin(ang);
+    for (let i = 0; i < n; i += len) {
+      let cr = 1, ci = 0;
+      for (let k = 0; k < len >> 1; k++) {
+        const a = i + k, b = a + (len >> 1);
+        const vr = re[b] * cr - im[b] * ci, vi = re[b] * ci + im[b] * cr;
+        const ur = re[a], ui = im[a];
+        re[a] = ur + vr; im[a] = ui + vi;
+        re[b] = ur - vr; im[b] = ui - vi;
+        const ncr = cr * wr - ci * wi; ci = cr * wi + ci * wr; cr = ncr;
+      }
+    }
+  }
+}
+/* 单轴功率谱（去均值 + 4× 补零提频率分辨率） */
+function axisSpectrum(prof) {
+  const n = prof.length;
+  if (n < 64) return null;
+  let mean = 0;
+  for (let i = 0; i < n; i++) mean += prof[i];
+  mean /= n;
+  let N = 1;
+  while (N < n * 4) N <<= 1;
+  const re = new Float64Array(N), im = new Float64Array(N);
+  for (let i = 0; i < n; i++) re[i] = prof[i] - mean;
+  fft1d(re, im);
+  const pow = new Float64Array(N >> 1);
+  for (let k = 0; k < (N >> 1); k++) pow[k] = re[k] * re[k] + im[k] * im[k];
+  return { pow, N };
+}
+function powAt(S, p) {
+  const k = S.N / p, i0 = Math.floor(k), fr = k - i0;
+  return (i0 < 1 || i0 + 1 >= S.pow.length) ? 0 : S.pow[i0] * (1 - fr) + S.pow[i0 + 1] * fr;
+}
+/* 跨帧平均功率谱：谱不含相位 → 不受源网格逐帧相位抖动影响。
+   （直接对剖面求和会因抖动互相抵消：实测 12 帧求和峰/中位仅 6.7，平均谱为 13.2） */
+function avgSpectrum(profs) {
+  let acc = null, N = 0;
+  for (const pr of profs) {
+    const S = axisSpectrum(pr);
+    if (!S) continue;
+    if (!acc) { N = S.N; acc = new Float64Array(S.pow.length); }
+    for (let i = 0; i < S.pow.length; i++) acc[i] += S.pow[i];
+  }
+  if (!acc) return null;
+  for (let i = 0; i < acc.length; i++) acc[i] /= profs.length;
+  return { pow: acc, N };
+}
+/* 单轴相位：逐帧梳状搜索 → 跨帧圆均值。返回 { phase, coh }，coh=圆均值长度（越大越一致）。 */
+function meanPhase(profs, p) {
+  let cx = 0, cy = 0, n = 0;
+  for (const prof of profs) {
+    let bo = 0, bs = -Infinity;
+    for (let o = 0; o < p; o += p / 200) {
+      let s = 0, c = 0;
+      for (let x = o; x < prof.length - 1; x += p) {
+        const i0 = x | 0, fr = x - i0;
+        s += prof[i0] * (1 - fr) + prof[i0 + 1] * fr; c++;
+      }
+      if (c && s / c > bs) { bs = s / c; bo = o; }
+    }
+    const a = 2 * Math.PI * bo / p;
+    cx += Math.cos(a); cy += Math.sin(a); n++;
+  }
+  if (!n) return null;
+  return { phase: ((Math.atan2(cy, cx) / (2 * Math.PI) * p) % p + p) % p,
+           coh: Math.sqrt(cx * cx + cy * cy) / n };
+}
+/* 两轴共峰定周期 + 各轴圆均值定相位。profX/profY 为每帧一条剖面。返回 { px, py, ox, oy } 或 null。 */
+function detectGrid(profX, profY, lo = 2.5, hi = 24) {
+  const Sx = avgSpectrum(profX), Sy = avgSpectrum(profY);
+  if (!Sx || !Sy) return null;
+  const score = p => Math.sqrt(powAt(Sx, p) * powAt(Sy, p));
+  let bp = 0, bs = 0;
+  for (let p = lo; p <= hi; p += 0.005) { const s = score(p); if (s > bs) { bs = s; bp = p; } }
+  for (let p = Math.max(lo, bp - 0.01); p <= Math.min(hi, bp + 0.01); p += 0.0005) { const s = score(p); if (s > bs) { bs = s; bp = p; } }
+  if (!(bs > 0)) return null;
+  const all = [];
+  for (let p = lo; p <= hi; p += 0.005) all.push(score(p));
+  all.sort((a, b) => a - b);
+  const med = all[all.length >> 1];
+  if (!(med > 0) || bs / med < 10) return null;          // 无显著共峰 → 无稳定网格
+  const mx = meanPhase(profX, bp), my = meanPhase(profY, bp);
+  if (!mx || !my || (mx.coh + my.coh) / 2 < 0.35) return null;   // 相位跨帧过于散乱 → 不可靠
+  return { px: bp, py: bp, ox: mx.phase, oy: my.phase };
+}
+/* 逐帧累积梯度剖面（只统计不透明区；亮度先算一遍再求梯度，避免重复展开） */
+function gradProfile(img, acc) {
+  const w = img.width, h = img.height, d = img.data, np = w * h;
+  const L = acc.lum || (acc.lum = new Float32Array(np));
+  for (let p = 0, i = 0; p < np; p++, i += 4) L[p] = d[i+3] ? d[i] * 0.299 + d[i+1] * 0.587 + d[i+2] * 0.114 : 0;
+  const gx = acc.x, gy = acc.y;
+  for (let y = 1; y < h - 1; y++) for (let x = 1; x < w - 1; x++) {
+    const p = y * w + x;
+    if (!d[(p << 2) + 3]) continue;
+    const g = L[p];
+    if (d[((p + 1) << 2) + 3]) gx[x] += Math.abs(g - L[p + 1]);
+    if (d[((p + w) << 2) + 3]) gy[y] += Math.abs(g - L[p + w]);
+  }
+}
+/* 按网格线逐格采样：格中心小窗内取中值色；格内多数透明 → 整格透明（清掉抗锯齿光环）。
+   lx/ly 为网格线坐标（裁剪框坐标系，首尾已补齐覆盖整幅）。 */
+function resampleOnGrid(img, lx, ly) {
+  const sx = img.width, sy = img.height, d = img.data;
+  const nx = lx.length - 1, ny = ly.length - 1;
+  if (nx < 1 || ny < 1) return img;
+  const out = new Uint8ClampedArray(nx * ny * 4);
+  let maxW = 0;
+  for (let i = 1; i < lx.length; i++) maxW = Math.max(maxW, lx[i] - lx[i-1]);
+  for (let j = 1; j < ly.length; j++) maxW = Math.max(maxW, ly[j] - ly[j-1]);
+  const cap = (Math.ceil(maxW * 0.3) * 2 + 1) ** 2;
+  const cr = new Int32Array(cap), cg = new Int32Array(cap), cb = new Int32Array(cap);
+  for (let j = 0; j < ny; j++) {
+    const y0 = ly[j], y1 = ly[j+1];
+    const cy = (y0 + y1) / 2, ry = Math.max(0.5, (y1 - y0) * 0.3);
+    const ay = Math.max(0, Math.floor(cy - ry)), by = Math.min(sy - 1, Math.ceil(cy + ry));
+    for (let i = 0; i < nx; i++) {
+      const x0 = lx[i], x1 = lx[i+1];
+      const cx = (x0 + x1) / 2, rx = Math.max(0.5, (x1 - x0) * 0.3);
+      const ax = Math.max(0, Math.floor(cx - rx)), bx = Math.min(sx - 1, Math.ceil(cx + rx));
+      if (ax > bx || ay > by) continue;
+      let n = 0, tot = 0;
+      for (let yy = ay; yy <= by; yy++) for (let xx = ax; xx <= bx; xx++) {
+        const k = (yy * sx + xx) * 4;
+        tot++;
+        if (d[k+3]) { cr[n] = d[k]; cg[n] = d[k+1]; cb[n] = d[k+2]; n++; }
+      }
+      if (!n || n * 2 <= tot) continue;            // 多数透明 → 整格透明
+      insSort(cr, n); insSort(cg, n); insSort(cb, n);
+      const m = n >> 1, o = (j * nx + i) * 4;
+      out[o] = cr[m]; out[o+1] = cg[m]; out[o+2] = cb[m]; out[o+3] = 255;
+    }
+  }
+  return { width: nx, height: ny, data: out };
 }
 
 /* 等比降采样（含 alpha 两态化：格内任一源像素不透明 → 不透明取均值，否则透明——
@@ -1202,7 +1358,8 @@ function frameToImageData(src) {
 /* --- 全量处理（流式）：整个视频 [0, dur] 一次性像素化成共享素材库（V.lib）。
    内存上只保留处理后的 64×64 级帧，原始帧即抓即弃：
    ① 采样 ≤32 帧取全片抠像 bbox 并集 → 固定参考框（帧间共享裁剪窗 → 主体位置稳定）；
-   ② 逐帧 seek → 抓帧 → 抠像 → 裁剪 → 降采样 → 质量池累积；
+      开启「原生网格」时同步累积梯度剖面 → FFT 估源图像素网格（周期 + 相位）；
+   ② 逐帧 seek → 抓帧 → 抠像 → 裁剪 → [原生网格重采样] → 降采样 → 质量池累积；
    ③ 跨帧共享色板量化 → 基础帧（对齐 video.py：量化在降采样后，描边占 1 个色数配额）；
    返回 { raw, pal }：raw = 降采样帧（量化输入），pal = 共享色板。
    ④ 由 assignBase（逐像素/区域众数）→ applyPost（空间清理/时间稳定/描边）收尾。
@@ -1217,15 +1374,23 @@ async function buildLibrary(token) {
   const dx = +($('dx').value || 0)|0, dy = +($('dy').value || 0)|0;
   const key = $('key').value;
   const ow = capSize(+$('ow').value || 64), oh = capSize(+$('oh').value || 64);
+  const gridOn = $('grid').checked;
 
-  // ① 采样 ≤32 帧（含端点分布覆盖运动包络）合并参考框
+  // ① 采样 ≤32 帧（含端点分布覆盖运动包络）合并参考框；同时逐帧累积梯度剖面供网格检测
   let ref = null;
+  const profX = gridOn ? [] : null, profY = gridOn ? [] : null;
   const S = Math.min(32, n);
   for (let s = 0; s < S; s++) {
     if (token !== jobToken) throw new Error('aborted');
     const im = await grabFrame((s + 0.5) * V.dur / S);
     if (!im) continue;
-    const b = alphaStats(keyApply(im, key)).bbox;
+    const keyed = keyApply(im, key);
+    if (profX && profX.length < 12) {                 // 每帧单独存剖面（平均谱需要逐帧）
+      const acc = { x: new Float64Array(v.videoWidth || 0), y: new Float64Array(v.videoHeight || 0) };
+      gradProfile(keyed, acc);
+      profX.push(acc.x); profY.push(acc.y);
+    }
+    const b = alphaStats(keyed).bbox;
     if (!b) continue;
     ref = ref ? [Math.min(ref[0],b[0]), Math.min(ref[1],b[1]), Math.max(ref[2],b[2]), Math.max(ref[3],b[3])] : b;
     if (s % 8 === 7 || s === S - 1) { setStatus(`分析构图 ${s + 1}/${S}…`); await yieldUI(); }
@@ -1233,6 +1398,30 @@ async function buildLibrary(token) {
   if (!ref) ref = [0, 0, (v.videoWidth || 64) - 1, (v.videoHeight || 64) - 1];
   const M = Math.round(Math.max(8, (ref[2]-ref[0])*0.02));   // 边距 ~2%（防边缘裁切、留呼吸）
   ref = [Math.max(0,ref[0]-M), Math.max(0,ref[1]-M), ref[2]+M, ref[3]+M];
+
+  // ①.5 网格检测：相位换算到裁剪框坐标系并生成覆盖整幅的网格线（网格固定在源帧空间）
+  let grid = null;
+  if (gridOn) {
+    if (profX && profX.length >= 3) {
+      const g = detectGrid(profX, profY);
+      if (g) {
+        const mk = (p, o, span) => {
+          const out = [];
+          for (let x = o - Math.ceil(o / p) * p; x <= span; x += p) out.push(x);
+          if (out[out.length - 1] < span) out.push(out[out.length - 1] + p);
+          return out;
+        };
+        const ox = ((g.ox - ref[0]) % g.px + g.px) % g.px;
+        const oy = ((g.oy - ref[1]) % g.py + g.py) % g.py;
+        grid = { px: g.px, py: g.py, lx: mk(g.px, ox, ref[2] - ref[0]), ly: mk(g.py, oy, ref[3] - ref[1]) };
+      }
+    }
+    const gi = $('gridInfo');
+    if (grid) gi.textContent = `网格 ${grid.px.toFixed(2)}×${grid.py.toFixed(2)}px → ${grid.lx.length-1}×${grid.ly.length-1} 格`;
+    else gi.textContent = '未检出稳定网格（两轴无显著共峰）→ 已按常规降采样';
+  } else {
+    $('gridInfo').textContent = '未启用；开启后按源图原生像素网格采样（需源存在稳定网格）';
+  }
 
   // ② 逐帧流式处理（峰值内存 ≈ 1 帧原始图 + 全部 64×64 级产物）
   const raw64 = [];
@@ -1243,6 +1432,7 @@ async function buildLibrary(token) {
     if (!im) continue;
     let img = keyApply(im, key);
     img = cropToBox(img, ref);
+    if (grid) img = resampleOnGrid(img, grid.lx, grid.ly);   // 原生网格：先还原到源像素网格
     img = downsampleContain(img, ow, oh, fit);
     img = placeOnCanvas(img, cw, ch, dx, dy);   // 不做形心锚定（源位置亚像素稳定，锚定反而制造台阶抖动）
     raw64.push(img);
@@ -1787,7 +1977,7 @@ function init() {
 
   // 处理参数：改动使全量素材过期（黄色像素团），点「▶ 处理」重新生成；区间调整不在此列（实时重映射）
   // assign/flat/orphan/tstab = 色阶分配与后处理参数：只重跑量化/清理、不重抽帧（onParamChange 按 POST_IDS 分流）
-  ['fps','ow','oh','cw','ch','dx','dy','colors','fit','outline','outlineColor','key','assign','flat','orphan','tstab'].forEach(id => {
+  ['fps','ow','oh','cw','ch','dx','dy','colors','fit','grid','outline','outlineColor','key','assign','flat','orphan','tstab'].forEach(id => {
     $(id).addEventListener('input', () => { onParamChange(id); if (id === 'fps') refreshTrackDisplay(); });
   });
 
