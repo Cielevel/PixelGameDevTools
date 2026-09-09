@@ -1,0 +1,22 @@
+{
+  "version": 1,
+  "name": "AI 视频 → 64x64 四件套（与 video-std 默认同口径）",
+  "input": {
+    "op": "source.video",
+    "params": { "path": "in/dog_walk.mp4", "fps": 12 }
+  },
+  "stages": [
+    { "op": "chroma-key",    "params": { "mode": "auto" } },
+    { "op": "crop",          "params": { "mode": "auto" } },
+    { "op": "resize",        "params": { "size": [64, 64], "fit": "contain" } },
+    { "op": "remove-bg",     "params": { "mode": "auto" } },
+    { "op": "quantize",      "params": { "colors": 16 } },
+    { "op": "temporal-mode", "params": { "window": 3 } },
+    { "op": "outline",       "params": { "color": "#182b54" } },
+    { "op": "export-frames" },
+    { "op": "export-gif" },
+    { "op": "export-sheet",  "params": { "source-route": "sampled", "format": "aseprite" } },
+    { "op": "gate-check",    "params": { "size": [64, 64], "no-frames": true, "no-anim": true } }
+  ],
+  "output": { "dir": "out/dog_walk/" }
+}

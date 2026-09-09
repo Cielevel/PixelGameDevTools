@@ -1,0 +1,2173 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<title>Video-Std 视频像素化工作台</title>
+<style>
+/* ── Linear 设计系统 token（source: VoltAgent/awesome-design-md → design-md/linear.app）
+   表面阶梯 canvas→surface1/2/3 + 发丝线边框承载层次，无渐变、无投影；
+   薰衣草蓝 --acc 只用于：品牌色标 / 主 CTA / 焦点环（Linear 稀缺用色原则）。
+   --bg/--panel/--edge/--txt/--sub/--acc/--ok/--warn/--bad 被 JS 内联样式引用，名称不可改 ── */
+:root {
+  --bg:#010102;            /* canvas：近纯黑、微蓝调 */
+  --panel:#0f1011;         /* surface-1：卡片/面板/次级按钮 */
+  --panel-2:#141516;       /* surface-2：hover/抬升面 */
+  --panel-3:#18191a;       /* surface-3：按压面 */
+  --edge:#23252a;          /* hairline */
+  --edge-hi:#34343a;       /* hairline-strong */
+  --txt:#d0d6e0;           /* ink-muted：正文 */
+  --ink:#f7f8f8;           /* ink：强调文本/数值 */
+  --sub:#8a8f98;           /* ink-subtle */
+  --dim:#62666d;           /* ink-tertiary */
+  --acc:#5e6ad2;           /* lavender */
+  --acc-hov:#828fff;
+  --acc-foc:#5e69d1;
+  --ok:#27a644;
+  --warn:#d99a3d;
+  --bad:#e5484d;           /* 红：像素团指示器空态（未添加视频） */
+}
+* { box-sizing:border-box; }
+/* [hidden] 兜底：作者样式（如 .row{display:flex}）优先级高于 UA 的 [hidden]{display:none}，
+   不加这条则带 hidden 属性的 .row（键色行）不会真正隐藏 */
+[hidden] { display:none !important; }
+html, body { height:100%; }
+body {
+  margin:0; color:var(--txt); background:var(--bg);
+  font:13px/1.55 "Inter","SF Pro Text",-apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",system-ui,sans-serif;
+  display:flex; flex-direction:column;
+  -webkit-font-smoothing:antialiased;
+}
+::-webkit-scrollbar { width:10px; height:10px; }
+::-webkit-scrollbar-thumb { background:#26272a; border-radius:8px; border:2px solid var(--bg); }
+::-webkit-scrollbar-thumb:hover { background:#34343a; }
+::-webkit-scrollbar-track { background:transparent; }
+::selection { background:rgba(94,106,210,.4); }
+
+/* ── 顶栏 = Linear top-nav（canvas 底 / 56px / 发丝底线） ── */
+header {
+  flex:none; height:56px; padding:0 20px;
+  display:flex; gap:14px; align-items:center;
+  background:var(--bg); border-bottom:1px solid var(--edge);
+}
+header h1 {
+  display:flex; align-items:center; gap:9px; margin:0;
+  font-size:14px; font-weight:600; letter-spacing:-.2px; color:var(--ink); white-space:nowrap;
+}
+header h1::before {   /* 品牌色标：薰衣草方块 */
+  content:""; width:10px; height:10px; border-radius:3px;
+  background:var(--acc); box-shadow:0 0 0 1px rgba(94,106,210,.35);
+}
+header .sub { color:var(--sub); font-size:12px; min-width:0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+#status {   /* 状态胶囊（status-badge）：JS 会内联覆盖 color（--warn=异常 / --sub=常规） */
+  flex:none; max-width:440px; font-size:12px; color:var(--sub);
+  font-variant-numeric:tabular-nums;   /* 含中文，不用 mono 栈（CJK 回退会混排不齐） */
+  background:var(--panel-2); border:1px solid var(--edge); border-radius:999px; padding:3px 12px;
+  white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+}
+#status:empty { display:none; }
+
+/* ── 三栏：输入参数 | 预览 | 输出导出 ── */
+main { flex:1; min-height:0; display:grid; grid-template-columns:336px minmax(0,1fr) 336px; grid-template-rows:minmax(0,1fr); }
+section { overflow:auto; min-height:0; min-width:0; padding:16px 18px 20px; }
+#left { border-right:1px solid var(--edge); }
+#center { display:flex; flex-direction:column; padding:18px 24px; }
+#right { border-left:1px solid var(--edge); }
+
+/* ── 眉题（eyebrow：正字距）与卡片（feature-card：surface-1 + hairline + 12px 圆角） ── */
+h2 { font-size:12px; font-weight:500; color:var(--sub); letter-spacing:.4px; margin:2px 0 10px; }
+fieldset {
+  border:1px solid var(--edge); border-radius:12px; margin:0 0 12px;
+  padding:10px 16px 14px; background:var(--panel);
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.03);   /* Linear：抬升面板顶缘的微弱白色高光 */
+}
+/* 卡片标题：不用 <legend>（原生会把文字骑在边框上、一半在块外），改普通元素放块内左上 */
+.cap { font-size:12px; font-weight:500; color:var(--sub); letter-spacing:.4px; margin:0 0 10px; }
+
+/* ── 表单行与输入控件（text-input：canvas 内嵌底 + hairline，焦点环 2px lavender@50%）
+   行结构约定：控件一行（label 固定列宽 60px 对齐），说明文字一律 .hint 独立成行，
+   不与控件同行抢宽 → 窄栏（内容宽 ~266px）下不再出现随机折行 ── */
+.row { display:flex; gap:6px; align-items:center; margin:7px 0; }
+.row > label:first-child { flex:none; width:60px; }
+.row.sub { padding-left:66px; }   /* 缩进对齐到 label 之后的控件区 */
+label { color:var(--sub); }
+.unit { color:var(--sub); }
+.note { color:var(--sub); font-size:12px; }
+.hint { color:var(--dim); font-size:12px; line-height:1.55; margin-top:3px; word-break:keep-all; overflow-wrap:break-word; }
+.hint + .hint { margin-top:0; }
+.field { margin:9px 0; }
+.field .row { margin:0; }
+.field .row.sub { margin-top:6px; }
+.pad { width:28px; padding:3px 0; text-align:center; }
+/* 左栏网格统一：label 列 60px（.row 约定）+ 控件行统一占满剩余宽（66px 起、右缘与 hint/区间卡对齐）。
+   数值输入不分单双列统一 64px（取消 dx/dy 52px 特例）；select 撑满控件区；
+   .row.sub 按钮行与「+ 添加区间」撑满行宽；孤悬色块推到行右缘 → 各行右缘齐平 */
+#left input[type=number] { width:64px; }
+#left select { flex:1; min-width:0; }
+#left .row.sub > button { flex:1 1 auto; }
+#outlineColor { margin-left:auto; }
+input[type=text],input[type=number],select {
+  background:var(--bg); border:1px solid var(--edge); color:var(--txt);
+  border-radius:8px; padding:4px 8px; font:inherit;
+  transition:border-color .12s ease;
+}
+input[type=text]:hover,input[type=number]:hover,select:hover { border-color:var(--edge-hi); }
+input[type=text]:focus,input[type=number]:focus,select:focus {
+  outline:2px solid rgba(94,106,210,.5); outline-offset:-1px; border-color:var(--acc-foc);
+}
+input[type=number] { width:70px; font-variant-numeric:tabular-nums; }
+input[type=checkbox] { accent-color:var(--acc); width:15px; height:15px; cursor:pointer; }
+input[type=color] {
+  background:var(--bg); border:1px solid var(--edge); border-radius:6px;
+  padding:1px; width:40px; height:26px; cursor:pointer;
+}
+select { cursor:pointer; }
+input[type=range] { accent-color:var(--acc); }
+
+/* ── 按钮：primary=薰衣草 CTA / 默认=secondary（surface-1 + hairline）/ mini=紧凑档 ── */
+button {
+  background:var(--panel); border:1px solid var(--edge); color:var(--txt);
+  border-radius:8px; padding:5px 12px; font:inherit; font-weight:500; cursor:pointer;
+  transition:background .12s ease, border-color .12s ease;
+}
+button:hover { background:var(--panel-2); border-color:var(--edge-hi); }
+button:active { background:var(--panel-3); }
+button:focus-visible { outline:2px solid rgba(94,106,210,.5); outline-offset:1px; }
+button:disabled { opacity:.45; cursor:not-allowed; }
+button.primary { background:var(--acc); border-color:var(--acc-foc); color:#fff; }
+button.primary:hover { background:var(--acc-hov); border-color:var(--acc-hov); }
+button.primary:active { background:var(--acc-foc); }
+button.mini { padding:3px 9px; font-size:12px; border-radius:6px; }
+
+/* ── 拖放区（唯一允许 lavender 提示的交互位：主导入 CTA） ── */
+#drop {
+  width:100%; min-height:150px; margin-bottom:12px;   /* 与 fieldset 的 12px 块间距统一 */
+  border:1px dashed var(--edge-hi); border-radius:12px; background:var(--bg);
+  display:flex; flex-direction:column; gap:4px; align-items:center; justify-content:center;
+  text-align:center; color:var(--sub); cursor:pointer;
+  transition:border-color .15s ease, color .15s ease, box-shadow .15s ease;
+}
+#drop::before { content:"↓"; font-size:20px; line-height:1; color:var(--dim); margin-bottom:2px; transition:color .15s ease; }
+#drop:hover { border-color:var(--acc); color:var(--txt); }
+#drop:hover::before { color:var(--acc-hov); }
+#drop.hover { border-color:var(--acc); color:var(--acc-hov); box-shadow:0 0 0 2px rgba(94,106,210,.5); }
+#drop > * { pointer-events:none; }   /* 指针移到子元素上不向 #drop 冒泡 dragleave（拖放高亮闪烁） */
+
+/* ── 预览舞台（product-screenshot-card：surface-1 + 16px 圆角 + 顶缘高光） ── */
+#vstage {
+  position:relative; width:100%; min-height:280px;
+  display:flex; align-items:center; justify-content:center;
+  background:var(--panel); border:1px solid var(--edge); border-radius:16px;
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.03); overflow:hidden;
+}
+#vstage img,#vstage canvas { display:block; background:repeating-conic-gradient(#141516 0 25%, #0d0e10 0 50%) 0 0/24px 24px; border-radius:2px; image-rendering:pixelated; }
+#vmeta {
+  margin:0 0 12px;   /* 上方由 #drop 的 12px 下边距负责，自身挂 12px 下边距与卡片节奏统一 */
+  color:var(--sub); font-size:12px; white-space:pre;
+  font-variant-numeric:tabular-nums;   /* 文件名+中文混排，不用 mono 栈 */
+  background:var(--bg); border:1px solid var(--edge); border-radius:8px; padding:7px 10px;
+}
+#vmeta:empty { display:none; }
+
+/* ── 预览控制条（置于视频上方：缩放只伸缩下方画布，栏目位置稳定）/ 时间轴 ── */
+#previewbar {
+  width:100%; display:flex; gap:8px; align-items:center; flex-wrap:wrap;
+  margin:0 0 12px; padding:10px 12px;
+  background:var(--panel); border:1px solid var(--edge); border-radius:12px;
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.03);
+}
+#previewbar label { margin-left:4px; }
+#previewbar input[type=range] { flex:1; min-width:90px; }
+#frameNo { color:var(--sub); font-size:12px; font-variant-numeric:tabular-nums; font-family:ui-monospace,"Cascadia Mono","JetBrains Mono",Consolas,monospace; }
+
+/* ── 轨道编辑器（裁剪区间多轨道化：每轨道独立播放/导出，轨道间允许时间重叠） ── */
+#trackbox {
+  width:100%; margin:0 0 12px; padding:8px 10px 10px;
+  background:var(--panel); border:1px solid var(--edge); border-radius:12px;
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.03);
+}
+.trackbar { display:flex; gap:10px; align-items:center; margin:0 0 6px; }
+.trackbar .note { min-width:0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+#truler { display:block; height:16px; margin:0 74px 0 32px; width:calc(100% - 106px); }   /* 与轨道行 lane 对齐（左让播放钮、右让缩略图+删除钮） */
+.trow { display:flex; gap:6px; align-items:center; margin-top:6px; }
+.tplay, .tdel { flex:none; width:26px; padding:3px 0; text-align:center; }
+.tthumb {   /* 轨道自己的画面：独立播放时各播各的 */
+  flex:none; width:36px; height:36px; border:1px solid var(--edge); border-radius:4px;
+  background:repeating-conic-gradient(#141516 0 25%, #0d0e10 0 50%) 0 0/12px 12px; image-rendering:pixelated;
+}
+.tl {
+  position:relative; flex:1; min-width:0; height:30px;
+  background:var(--bg); border:1px solid var(--edge); border-radius:6px;
+  overflow:hidden; touch-action:none; user-select:none;
+}
+.tl.sel { border-color:var(--acc-foc); box-shadow:0 0 0 1px rgba(94,106,210,.35); }
+.tclip {
+  position:absolute; top:2px; bottom:2px; min-width:6px;
+  background:rgba(94,106,210,.26); border:1px solid rgba(130,143,255,.4); border-radius:4px;
+  cursor:grab; overflow:hidden;
+}
+.tl.sel .tclip { background:rgba(94,106,210,.45); border-color:var(--acc-hov); }
+.tlabel { padding:0 12px; font-size:11px; line-height:1; color:var(--txt); white-space:nowrap; pointer-events:none; font-variant-numeric:tabular-nums; }
+.tgrip { position:absolute; top:0; bottom:0; width:9px; cursor:ew-resize; }
+.tgrip.L { left:0; } .tgrip.R { right:0; }
+.tgrip::after { content:""; position:absolute; top:8px; bottom:8px; width:2px; background:rgba(216,221,230,.55); }
+.tgrip.L::after { left:2px; } .tgrip.R::after { right:2px; }
+.thead {   /* 播放头：区间内拖拽逐帧预览；输入统一由 lane 级 pointerdown 按命中区分发 */
+  position:absolute; top:0; bottom:0; width:2px; margin-left:-1px; background:var(--ink); pointer-events:none;
+}
+.thead::before { content:""; position:absolute; top:0; left:-4px; border:5px solid transparent; border-top-color:var(--ink); }
+
+/* ── 中栏标题行：眉题 + 旁注 + 脏状态像素团指示器（黄=待处理 / 绿=已同步） ── */
+.stage-head { display:flex; align-items:baseline; gap:10px; margin:2px 0 10px; }
+.stage-head h2 { margin:0; }
+.pixsync { flex:none; align-self:center; margin-left:auto; }
+#syncState { flex:none; }
+
+/* ── 右栏：帧统计（changelog-row 式发丝行线）/ 导出按钮 ── */
+.exp-bar { display:flex; gap:6px; flex-wrap:wrap; margin:6px 0; }
+.exp-bar button { flex:1 1 calc(50% - 3px); }
+th,td { padding:3px 6px; text-align:left; }
+#fstats { width:100%; border-collapse:collapse; font-size:12px; }
+#fstats td { border-top:1px solid var(--edge); padding:6px 4px; }
+#fstats tr:first-child td { border-top:none; }
+#fstats td:first-child { color:var(--sub); }
+#fstats td:last-child {
+  text-align:right; color:var(--ink); font-variant-numeric:tabular-nums;
+}
+</style>
+</head>
+<body>
+<header>
+  <h1>Video-Std 视频像素化工作台</h1>
+  <span class="sub">AI 像素视频 → 标准像素动画（多轨道 · 采样帧率 · 预览 · 多格式导出）</span>
+  <span class="sub" style="margin-left:auto; opacity:.6">v2.1.0</span>
+  <div id="status"></div>
+</header>
+<main>
+  <!-- 左：设置 -->
+  <section id="left">
+    <div id="drop" onclick="$('file').click()">拖入或点击选择视频<br><span class="note">MP4 / WebM / MOV（浏览器可解码）</span></div>
+    <input type="file" id="file" accept="video/*" hidden>
+    <div id="vmeta"></div>
+
+    <fieldset aria-label="采样帧率"><div class="cap">采样帧率</div>
+      <div class="row"><label>帧率</label><input type="number" id="fps" step="0.1" min="1" max="120" value="24"><span class="unit">帧/秒</span></div>
+      <div class="row sub">
+        <button class="mini" data-fps="12">12</button>
+        <button class="mini" data-fps="24">24</button>
+        <button class="mini" data-fps="30">30</button>
+        <button class="mini" data-fps="60">60</button>
+      </div>
+      <div class="hint">从区间均匀采样</div>
+      <div class="hint">源 24fps 时：24=全帧、12=减半</div>
+    </fieldset>
+
+    <fieldset aria-label="标准化参数"><div class="cap">标准化参数</div>
+      <div class="field">
+        <div class="row"><label>主体尺寸</label><input type="number" id="ow" min="1" max="1024" value="64"><span class="unit">×</span><input type="number" id="oh" min="1" max="1024" value="64"><span class="unit">px</span></div>
+        <div class="hint">等比缩放主体到该尺寸</div>
+      </div>
+      <div class="field">
+        <div class="row"><label>输出画布</label><input type="number" id="cw" min="1" max="1024" value="64"><span class="unit">×</span><input type="number" id="ch" min="1" max="1024" value="64"><span class="unit">px</span></div>
+        <div class="hint">不改主体大小，调画布大小即调占比</div>
+      </div>
+      <div class="field">
+        <div class="row"><label>等比保形</label><input type="checkbox" id="fit" checked><span class="unit">contain（居中留边）</span></div>
+      </div>
+      <div class="field">
+        <div class="row"><label>原生网格</label><input type="checkbox" id="grid"><span class="unit">检测并逐格采样</span></div>
+        <div class="hint" id="gridInfo">未启用；开启后按源图原生像素网格采样（需源存在稳定网格）</div>
+      </div>
+      <div class="field">
+        <div class="row"><label>主体位置</label><span class="unit">X</span><input type="number" id="dx" min="-99" max="99" value="0"><span class="unit">Y</span><input type="number" id="dy" min="-99" max="99" value="0"></div>
+        <div class="row sub">
+          <button class="mini pad" id="mvL" title="左移 1px">←</button>
+          <button class="mini pad" id="mvU" title="上移 1px">↑</button>
+          <button class="mini pad" id="mvD" title="下移 1px">↓</button>
+          <button class="mini pad" id="mvR" title="右移 1px">→</button>
+          <button class="mini" id="mvReset">复位</button>
+        </div>
+        <div class="hint">X 正=右移、Y 正=下移；箭头每点 1px</div>
+      </div>
+      <div class="field">
+        <div class="row"><label>目标色数</label><input type="number" id="colors" min="0" max="64" value="16"><span class="unit">0=不量化</span></div>
+      </div>
+      <div class="field">
+        <div class="row"><label>时间维</label><input type="number" id="temporal" min="0" max="31" value="0"><span class="unit">帧（0=关）</span></div>
+        <div class="hint">逐像素沿时间轴取中值，压帧间闪烁；运动感知（与相邻帧一致就保留，不拖旧色）</div>
+        <div class="hint">与「后处理 → 时间稳定」的区别：本项在<b>量化前</b>取中值（会进色板统计），时间稳定在<b>量化后</b>取众数（不引出色板外颜色）；两者都开＝两次时间平滑，一般只留其一</div>
+      </div>
+      <div class="field">
+        <div class="row"><label>1px 描边</label><input type="checkbox" id="outline" checked><span class="unit">启用</span><input type="color" id="outlineColor" value="#000000"></div>
+      </div>
+      <div class="field">
+        <div class="row"><label>幕色抠像</label>
+          <select id="key"><option value="auto">auto（检测幕色）</option><option value="none">none</option><option value="green" title="主体忌含绿">强制绿幕</option><option value="magenta" title="主体含绿/蓝均可，像素画透明惯例色">强制品红幕</option><option value="blue" title="主体含绿（植被/绿衣）时用，主体忌含蓝">强制蓝幕</option><option value="cyan" title="主体全暖色调时用，主体忌含青/蓝绿">强制青幕</option><option value="custom" title="点击画面或用选色器取任意键色">custom（自由取色）</option></select>
+        </div>
+        <div class="row" id="customRow" hidden><label>键色</label>
+          <button class="mini" id="pickKey">取键色</button>
+          <input type="color" id="keyColor" value="#00b140" title="点击画面取色，或在此选任意色">
+          <span class="note" id="keyHex">未设置</span>
+        </div>
+      </div>
+    </fieldset>
+
+    <fieldset aria-label="后处理（可选）"><div class="cap">后处理（可选）</div>
+      <div class="field">
+        <div class="row"><label>色阶分配</label>
+          <select id="assign">
+            <option value="nearest">逐像素最近色</option>
+            <option value="region:0.03">区域众数·细</option>
+            <option value="region:0.05">区域众数·中</option>
+            <option value="region:0.08">区域众数·粗</option>
+          </select>
+        </div>
+      </div>
+      <div class="field">
+        <div class="row"><label>平涂</label>
+          <select id="flat"><option value="0">关</option><option value="1">3×3 中值</option><option value="2">5×5 中值</option></select>
+        </div>
+      </div>
+      <div class="field">
+        <div class="row"><label>孤立像素</label><input type="checkbox" id="orphan"><span class="unit">清除</span></div>
+      </div>
+      <div class="field">
+        <div class="row"><label>时间稳定</label>
+          <select id="tstab"><option value="0">关</option><option value="3" selected>3 帧众数</option><option value="5">5 帧众数</option></select>
+        </div>
+      </div>
+      <div class="hint">区域众数＝先按连续色分区、再整体取色阶，边界更干净（需「目标色数」&gt; 0）</div>
+      <div class="hint">时间稳定默认 3 帧众数（拖影远小于时间维中值：只替换少数派、平局保留当前帧）；平涂/孤立默认关；改这些只需重跑量化、不重抽帧</div>
+    </fieldset>
+
+  </section>
+
+  <!-- 中：预览 -->
+  <section id="center">
+    <div class="stage-head"><h2>预览</h2><span class="note">参数修改不自动重处理，点「▶ 处理」应用</span>
+      <canvas id="pixsync" class="pixsync" hidden title="红=未添加视频 / 黄=有未处理的修改 / 绿=已与当前参数同步"></canvas><span class="note" id="syncState"></span><span class="note" id="stabState"></span>
+    </div>
+    <div id="previewbar">
+      <button id="pbtn" class="primary">▶ 处理</button>
+      <button id="playbtn" disabled>▶ 播放</button>
+      <label>缩放</label><input type="range" id="zoom" min="1" max="16" value="4" style="width:110px"><input type="number" id="zoomN" min="1" max="16" value="4" style="width:50px">
+      <label>帧号</label><input type="range" id="frameIdx" min="0" max="0" value="0" style="width:140px"><span id="frameNo">0/0</span>
+    </div>
+    <div id="trackbox">
+      <div class="trackbar">
+        <button id="addTrack" class="mini">+ 添加轨道</button>
+        <label class="note" for="trackUnit">单位</label>
+        <select id="trackUnit" class="mini"><option value="time">时间</option><option value="frames">帧数</option></select>
+        <span class="note">新轨道默认整段，独立裁剪（允许重叠）· 拖区块移动/边缘裁剪 · 点区间定位播放头 · 各轨道独立播放/导出</span>
+      </div>
+      <canvas id="truler"></canvas>
+      <div id="tracks"></div>
+    </div>
+    <div id="vstage"><img id="prev" style="max-width:100%;max-height:46vh"></div>
+  </section>
+
+  <!-- 右：统计 + 导出 -->
+  <section id="right">
+    <fieldset aria-label="帧统计"><div class="cap">帧统计</div>
+      <table id="fstats"></table>
+      <div class="hint">校验口径（pixcli check）：尺寸 / alpha 两态 / 色数 ≤16 / 连通域 / 孤立像素提示（P2）</div>
+    </fieldset>
+    <fieldset aria-label="导出"><div class="cap">导出</div>
+      <div class="exp-bar" id="exports"></div>
+      <div class="hint" id="expNote">点「▶ 处理」后在此生成导出项。</div>
+    </fieldset>
+  </section>
+</main>
+<script>
+"use strict";
+/* ═══════════════ 算法层（纯函数，复用 asset-inspector 的 OKLab/检测语义） ═══ */
+/* ⚠️ 口径同步约定：本文件与 asset-inspector.html 各自内联实现同一批算法（OKLab/感知色距、
+   网格检测、降采样、色度抠像、稳定性判据、sheet 元数据），为保「双击即用、零依赖」不抽公共模块。
+   改任一侧后必须跑 `python3 pixel-toolkit/tools/parity_frontend.py`（需 Node）——它从两个 HTML
+   抽取函数真身与 Python 侧对拍，不一致即红。清单与理由见 pixel-toolkit/tools/README.md。 */
+function $ (id) { return document.getElementById(id); }
+
+function rgbToOklab(r, g, b) {
+  const l = c => { c /= 255; return c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4); };
+  const rl = l(r), gl = l(g), bl = l(b);
+  const L = 0.4122214708 * rl + 0.5363325363 * gl + 0.0514459929 * bl;
+  const M = 0.2119034982 * rl + 0.6806995451 * gl + 0.1073969566 * bl;
+  const S = 0.0883024619 * rl + 0.2817188376 * gl + 0.6299787005 * bl;
+  const l_ = Math.cbrt(L), m_ = Math.cbrt(M), s_ = Math.cbrt(S);
+  return [0.2104542553 * l_ + 0.7936177850 * m_ - 0.0040720468 * s_,
+          1.9779984951 * l_ - 2.4285922050 * m_ + 0.4505937099 * s_,
+          0.0259040371 * l_ + 0.7827717662 * m_ - 0.8086757660 * s_];
+}
+function oklabDist2(a, b) { const dL = a[0]-b[0], da = a[1]-b[1], db = a[2]-b[2]; return dL*dL + da*da + db*db; }
+
+/* 幕色抠像与 pixel-toolkit/video.py 两段口径对齐：
+   检测（auto）＝四角众数 + 主通道增益判定（同 detect_green_screen/is_greenish，不含 40 阈差；
+   众数使单角被主体遮挡/带噪时不稀释判定）；抠像＝主通道占优 + 阈差 40（同 chroma_key 逐字节同条件），
+   外加一道 KEY_TESTS_WEAK 连通生长的边缘残留清除（video.py 暂无此级，见 chromaKey 注释）。
+   品红/蓝/青按同形「主通道占优」推广——双主通道键（品红 R≈B≫G、青 G≈B≫R）两主通道均须占优 */
+const KEY_TESTS = {
+  green:   (r,g,b) => g > 60 && g > r*1.1 && g > b*1.1 && (g-r) > 40 && (g-b) > 40,
+  magenta: (r,g,b) => r > 60 && b > 60 && r > g*1.1 && b > g*1.1 && (r-g) > 40 && (b-g) > 40,
+  blue:    (r,g,b) => b > 60 && b > r*1.1 && b > g*1.1 && (b-r) > 40 && (b-g) > 40,
+  cyan:    (r,g,b) => g > 60 && b > 60 && g > r*1.1 && b > r*1.1 && (g-r) > 40 && (b-r) > 40,
+};
+const KEY_DETECT = {   // 检测口径：只看主通道增益（video.py is_greenish 的同形推广）
+  green:   (r,g,b) => g > 60 && g > r*1.1 && g > b*1.1,
+  magenta: (r,g,b) => r > 60 && b > 60 && r > g*1.1 && b > g*1.1,
+  blue:    (r,g,b) => b > 60 && b > r*1.1 && b > g*1.1,
+  cyan:    (r,g,b) => g > 60 && b > 60 && g > r*1.1 && b > r*1.1,
+};
+const KEY_TESTS_WEAK = {   // 边界残留清除用弱判定（余量放宽：阈差 12 / 增益 1.05 / 下限 48）
+  green:   (r,g,b) => g > 48 && g > r*1.05 && g > b*1.05 && (g-r) > 12 && (g-b) > 12,
+  magenta: (r,g,b) => r > 48 && b > 48 && r > g*1.05 && b > g*1.05 && (r-g) > 12 && (b-g) > 12,
+  blue:    (r,g,b) => b > 48 && b > r*1.05 && b > g*1.05 && (b-r) > 12 && (b-g) > 12,
+  cyan:    (r,g,b) => g > 48 && b > 48 && g > r*1.05 && b > r*1.05 && (g-r) > 12 && (b-r) > 12,
+};
+function detectKey(id) {   // 四角众数落在哪种幕色（绿优先，向后兼容旧素材口径）
+  const px = (x,y) => { const i=(y*id.width+x)*4; return [id.data[i],id.data[i+1],id.data[i+2]]; };
+  const w = id.width, h = id.height;
+  const c = [px(0,0), px(w-1,0), px(0,h-1), px(w-1,h-1)];
+  let mode = c[0], best = 0;                 // 众数：计数最大者，平局取先出现者（同 Counter.most_common）
+  for (const p of c) {
+    let n = 0; for (const q of c) if (q[0]===p[0] && q[1]===p[1] && q[2]===p[2]) n++;
+    if (n > best) { best = n; mode = p; }
+  }
+  for (const k of ['green','magenta','blue','cyan']) if (KEY_DETECT[k](mode[0], mode[1], mode[2])) return k;
+  return null;
+}
+/* 自由取色：任意键色 → 与四预设完全同形的「主通道占优」判定。
+   通道差 ≥30 定结构（单主通道=绿/蓝型，双主通道=品红/青型）；四预设色代入可逐字节复现对应预设。
+   缺省余量 = 主判定（阈差 40 / 增益 1.1 / 下限 60）；传 (12, 1.05, 48) 得边界清除用弱判定。
+   低饱和（主通道不显著）返回 null——与只比色品不比明度的口径冲突，会误伤主体灰暗部。 */
+function testFromRGB(r, g, b, gap = 40, gain = 1.1, floor = 60) {
+  const v = [r, g, b];
+  const idx = [0, 1, 2].sort((a, c) => v[c] - v[a]);
+  let dom;
+  if (v[idx[0]] - v[idx[1]] >= 30) dom = [idx[0]];
+  else if (v[idx[1]] - v[idx[2]] >= 30) dom = [idx[0], idx[1]];
+  else return null;
+  const weakCh = [0, 1, 2].filter(i => !dom.includes(i));
+  return (pr, pg, pb) => {
+    const p = [pr, pg, pb];
+    return dom.every(d => p[d] > floor && weakCh.every(w => p[d] > p[w] * gain && (p[d] - p[w]) > gap));
+  };
+}
+let CUSTOM_TEST = null;      // custom 模式的键色主判定（取色后由 testFromRGB 生成）
+let CUSTOM_TEST_WEAK = null; // custom 模式的键色弱判定（边缘残留清除用）
+let pickingKey = false;      // 取键色模式：点击预览画面读原始帧像素
+let pickFrame = null;      // 取色时展示的原始帧（按需从 video 元素现抓，不整包驻留内存）
+function chromaKey(id, test, weakTest) {   // 主判定命中 → 透明（与视频标准化口径一致）
+  if (!test) return id;
+  const d = new Uint8ClampedArray(id.data), w = id.width, h = id.height;
+  for (let i = 0; i < d.length; i += 4) {
+    if (d[i+3] && test(d[i], d[i+1], d[i+2])) { d[i]=d[i+1]=d[i+2]=0; d[i+3]=0; }
+  }
+  if (weakTest) {
+    /* 边缘残留清除：4:2:0 色度采样 + 帧间压缩在轮廓处留下 1~5px「幕色↔主体」混色过渡带，
+       这些像素的值贴着主阈值分布且逐帧漂移 → 幕色残留边 + 边缘闪烁（实测蓝幕样片每帧约
+       1200 个可清除带像素、输出端 24 帧 1098 个可见偏蓝边界格）。用放宽余量的弱判定从已
+       透明区连通生长（每轮 1px、先标记后杀保证确定性，≤4 轮覆盖过渡带），吃到实色主体为止；
+       连通约束保证主体内部同色像素不被波及。 */
+    const mark = new Uint8Array(w * h);
+    for (let round = 0; round < 4; round++) {
+      let changed = false;
+      for (let y = 0; y < h; y++) {
+        const row = y * w;
+        for (let x = 0; x < w; x++) {
+          const p = row + x, i = p * 4;
+          if (!d[i+3]) continue;
+          const nearTrans = (x > 0 && !d[i-4+3]) || (x < w-1 && !d[i+4+3]) ||
+                            (y > 0 && !d[i-w*4+3]) || (y < h-1 && !d[i+w*4+3]);
+          if (nearTrans && weakTest(d[i], d[i+1], d[i+2])) { mark[p] = 1; changed = true; }
+        }
+      }
+      if (!changed) break;
+      for (let p = 0; p < mark.length; p++) {
+        if (!mark[p]) continue;
+        const i = p * 4; d[i]=d[i+1]=d[i+2]=0; d[i+3]=0;
+      }
+    }
+  }
+  return { width:w, height:h, data:d };
+}
+function keyApply(id, mode) {           // auto → 四角检测幕色；强制 → 所选幕色；custom → 取色判定
+  let test = KEY_TESTS[mode], weakTest = KEY_TESTS_WEAK[mode];
+  if (mode === 'auto') { const k = detectKey(id); test = k ? KEY_TESTS[k] : null; weakTest = k ? KEY_TESTS_WEAK[k] : null; }
+  else if (mode === 'custom') { test = CUSTOM_TEST; weakTest = CUSTOM_TEST_WEAK; }
+  return test ? chromaKey(id, test, weakTest) : id;
+}
+function setCustomKey(rgb) {            // 设置自由键色：推导判定 + 更新 UI + 标脏（点「▶ 处理」生效）
+  const test = testFromRGB(rgb[0], rgb[1], rgb[2]);
+  const hex = '#' + rgb.map(c => c.toString(16).padStart(2, '0')).join('');
+  if (!test) { setStatus(`键色 ${hex} 主通道不显著（低饱和色），无法按主通道口径抠像`, true); return false; }
+  CUSTOM_TEST = test;
+  CUSTOM_TEST_WEAK = testFromRGB(rgb[0], rgb[1], rgb[2], 12, 1.05, 48);
+  $('keyColor').value = hex; $('keyHex').textContent = hex + '（可重新取色/选色）';
+  onParamChange('keyColor');            // 只标脏（选色器拖动不刷屏，处理按钮一键应用）
+  return true;
+}
+
+/* 透明像素统计 + 内容 bbox（alpha 判据） */
+function alphaStats(id) {
+  const d = id.data, w = id.width, h = id.height;
+  let x0=Infinity,y0=Infinity,x1=-1,y1=-1,total=0;
+  for (let y=0;y<h;y++) for (let x=0;x<w;x++) {
+    const i=(y*w+x)*4;
+    if (d[i+3]>0) { total++; if(x<x0)x0=x; if(y<y0)y0=y; if(x>x1)x1=x; if(y>y1)y1=y; }
+  }
+  return { count: total, bbox: total ? [x0,y0,x1,y1] : null };
+}
+
+/* 固定框裁剪：从 img 中裁出参考框 [x0,y0,x1,y1]（帧间共享同一参考框 → 缩放窗口一致）。
+   越界部分透明补齐，保证输出尺寸恒定。 */
+function cropToBox(img, box) {
+  const [rx0, ry0, rx1, ry1] = box;
+  const rw = rx1-rx0+1, rh = ry1-ry0+1;
+  const out = new Uint8ClampedArray(rw*rh*4);
+  const d = img.data, sw = img.width;
+  for (let y=0;y<rh;y++) for (let x=0;x<rw;x++) {
+    const sx = rx0+x, sy = ry0+y;
+    const o=(y*rw+x)*4;
+    if (sx<0||sy<0||sx>=img.width||sy>=img.height) continue;
+    const i=(sy*sw+sx)*4;
+    out[o]=d[i]; out[o+1]=d[i+1]; out[o+2]=d[i+2]; out[o+3]=d[i+3];
+  }
+  return { width:rw, height:rh, data:out };
+}
+
+/* 主体放置到输出画布：不做行为锚定——源帧位置本身亚像素稳定（实测降采样后 X 极差 0.21px、
+   Y 极差 0.68px）；任何逐帧形心/bbox 对齐反而把亚像素波动圆整成 ±1px 台阶，制造假抖动。
+   直接按固定偏移贴画布中心（仅保留 dx/dy 手动位移）。 */
+function placeOnCanvas(img, cw, ch, dx, dy) {
+  const out = new Uint8ClampedArray(cw*ch*4);
+  // 主体（降采样后的帧即主体尺寸帧）整体贴画布中心：偏移 = (画布-主体)/2 + dx/dy
+  const ox = Math.round((cw - img.width)/2) + (dx|0);
+  const oy = Math.round((ch - img.height)/2) + (dy|0);
+  for (let y=0;y<img.height;y++) for (let x=0;x<img.width;x++) {
+    const i=(y*img.width+x)*4;
+    if (!img.data[i+3]) continue;
+    const nx=x+ox, ny=y+oy;
+    if (nx<0||ny<0||nx>=cw||ny>=ch) continue;
+    const j=(ny*cw+nx)*4;
+    out[j]=img.data[i]; out[j+1]=img.data[i+1]; out[j+2]=img.data[i+2]; out[j+3]=255;
+  }
+  return { width:cw, height:ch, data:out };
+}
+
+/* ═══ 原生网格重采样（可选）：检测源图像素网格（周期 + 相位）→ 逐格中心采样。
+   固定比例的盒式降采样若与源网格不同相位，每格都在混 2–4 个源块 + 抗锯齿边缘，
+   形成混色与拍频；按网格对齐采样可消掉这一层噪声。
+   周期判据：真网格周期在 X/Y 两轴的功率谱上同时显著（纹理特征不会两轴同周期），
+   取两轴谱功率的几何平均找峰——比单轴取最强峰稳得多（实测源 峰/中位 23.3，噪声仅 6.3）。 ═══ */
+
+/* 就地 radix-2 FFT（长度须为 2 的幂） */
+function fft1d(re, im) {
+  const n = re.length;
+  for (let i = 1, j = 0; i < n; i++) {
+    let bit = n >> 1;
+    for (; j & bit; bit >>= 1) j ^= bit;
+    j ^= bit;
+    if (i < j) { let t = re[i]; re[i] = re[j]; re[j] = t; t = im[i]; im[i] = im[j]; im[j] = t; }
+  }
+  for (let len = 2; len <= n; len <<= 1) {
+    const ang = -2 * Math.PI / len, wr = Math.cos(ang), wi = Math.sin(ang);
+    for (let i = 0; i < n; i += len) {
+      let cr = 1, ci = 0;
+      for (let k = 0; k < len >> 1; k++) {
+        const a = i + k, b = a + (len >> 1);
+        const vr = re[b] * cr - im[b] * ci, vi = re[b] * ci + im[b] * cr;
+        const ur = re[a], ui = im[a];
+        re[a] = ur + vr; im[a] = ui + vi;
+        re[b] = ur - vr; im[b] = ui - vi;
+        const ncr = cr * wr - ci * wi; ci = cr * wi + ci * wr; cr = ncr;
+      }
+    }
+  }
+}
+/* 单轴功率谱（去均值 + 4× 补零提频率分辨率） */
+function axisSpectrum(prof) {
+  const n = prof.length;
+  if (n < 64) return null;
+  let mean = 0;
+  for (let i = 0; i < n; i++) mean += prof[i];
+  mean /= n;
+  let N = 1;
+  while (N < n * 4) N <<= 1;
+  const re = new Float64Array(N), im = new Float64Array(N);
+  for (let i = 0; i < n; i++) re[i] = prof[i] - mean;
+  fft1d(re, im);
+  const pow = new Float64Array(N >> 1);
+  for (let k = 0; k < (N >> 1); k++) pow[k] = re[k] * re[k] + im[k] * im[k];
+  return { pow, N };
+}
+function powAt(S, p) {
+  const k = S.N / p, i0 = Math.floor(k), fr = k - i0;
+  return (i0 < 1 || i0 + 1 >= S.pow.length) ? 0 : S.pow[i0] * (1 - fr) + S.pow[i0 + 1] * fr;
+}
+/* 跨帧平均功率谱：谱不含相位 → 不受源网格逐帧相位抖动影响。
+   （直接对剖面求和会因抖动互相抵消：实测 12 帧求和峰/中位仅 6.7，平均谱为 13.2） */
+function avgSpectrum(profs) {
+  let acc = null, N = 0;
+  for (const pr of profs) {
+    const S = axisSpectrum(pr);
+    if (!S) continue;
+    if (!acc) { N = S.N; acc = new Float64Array(S.pow.length); }
+    for (let i = 0; i < S.pow.length; i++) acc[i] += S.pow[i];
+  }
+  if (!acc) return null;
+  for (let i = 0; i < acc.length; i++) acc[i] /= profs.length;
+  return { pow: acc, N };
+}
+/* 单轴相位：逐帧梳状搜索 → 跨帧圆均值。返回 { phase, coh }，coh=圆均值长度（越大越一致）。 */
+function meanPhase(profs, p) {
+  let cx = 0, cy = 0, n = 0;
+  for (const prof of profs) {
+    let bo = 0, bs = -Infinity;
+    for (let o = 0; o < p; o += p / 200) {
+      let s = 0, c = 0;
+      for (let x = o; x < prof.length - 1; x += p) {
+        const i0 = x | 0, fr = x - i0;
+        s += prof[i0] * (1 - fr) + prof[i0 + 1] * fr; c++;
+      }
+      if (c && s / c > bs) { bs = s / c; bo = o; }
+    }
+    const a = 2 * Math.PI * bo / p;
+    cx += Math.cos(a); cy += Math.sin(a); n++;
+  }
+  if (!n) return null;
+  return { phase: ((Math.atan2(cy, cx) / (2 * Math.PI) * p) % p + p) % p,
+           coh: Math.sqrt(cx * cx + cy * cy) / n };
+}
+/* 两轴共峰定周期 + 各轴圆均值定相位。profX/profY 为每帧一条剖面。返回 { px, py, ox, oy } 或 null。 */
+function detectGrid(profX, profY, lo = 2.5, hi = 24) {
+  const Sx = avgSpectrum(profX), Sy = avgSpectrum(profY);
+  if (!Sx || !Sy) return null;
+  const score = p => Math.sqrt(powAt(Sx, p) * powAt(Sy, p));
+  let bp = 0, bs = 0;
+  for (let p = lo; p <= hi; p += 0.005) { const s = score(p); if (s > bs) { bs = s; bp = p; } }
+  for (let p = Math.max(lo, bp - 0.01); p <= Math.min(hi, bp + 0.01); p += 0.0005) { const s = score(p); if (s > bs) { bs = s; bp = p; } }
+  if (!(bs > 0)) return null;
+  const all = [];
+  for (let p = lo; p <= hi; p += 0.005) all.push(score(p));
+  all.sort((a, b) => a - b);
+  const med = all[all.length >> 1];
+  if (!(med > 0) || bs / med < 10) return null;          // 无显著共峰 → 无稳定网格
+  const mx = meanPhase(profX, bp), my = meanPhase(profY, bp);
+  if (!mx || !my || (mx.coh + my.coh) / 2 < 0.35) return null;   // 相位跨帧过于散乱 → 不可靠
+  return { px: bp, py: bp, ox: mx.phase, oy: my.phase };
+}
+/* 逐帧累积梯度剖面（只统计不透明区；亮度先算一遍再求梯度，避免重复展开） */
+function gradProfile(img, acc) {
+  const w = img.width, h = img.height, d = img.data, np = w * h;
+  const L = acc.lum || (acc.lum = new Float32Array(np));
+  for (let p = 0, i = 0; p < np; p++, i += 4) L[p] = d[i+3] ? d[i] * 0.299 + d[i+1] * 0.587 + d[i+2] * 0.114 : 0;
+  const gx = acc.x, gy = acc.y;
+  for (let y = 1; y < h - 1; y++) for (let x = 1; x < w - 1; x++) {
+    const p = y * w + x;
+    if (!d[(p << 2) + 3]) continue;
+    const g = L[p];
+    if (d[((p + 1) << 2) + 3]) gx[x] += Math.abs(g - L[p + 1]);
+    if (d[((p + w) << 2) + 3]) gy[y] += Math.abs(g - L[p + w]);
+  }
+}
+/* 按网格线逐格采样：格中心小窗内取中值色；格内多数透明 → 整格透明（清掉抗锯齿光环）。
+   lx/ly 为网格线坐标（裁剪框坐标系，首尾已补齐覆盖整幅）。 */
+function resampleOnGrid(img, lx, ly) {
+  const sx = img.width, sy = img.height, d = img.data;
+  const nx = lx.length - 1, ny = ly.length - 1;
+  if (nx < 1 || ny < 1) return img;
+  const out = new Uint8ClampedArray(nx * ny * 4);
+  let maxW = 0;
+  for (let i = 1; i < lx.length; i++) maxW = Math.max(maxW, lx[i] - lx[i-1]);
+  for (let j = 1; j < ly.length; j++) maxW = Math.max(maxW, ly[j] - ly[j-1]);
+  const cap = (Math.ceil(maxW * 0.3) * 2 + 1) ** 2;
+  const cr = new Int32Array(cap), cg = new Int32Array(cap), cb = new Int32Array(cap);
+  for (let j = 0; j < ny; j++) {
+    const y0 = ly[j], y1 = ly[j+1];
+    const cy = (y0 + y1) / 2, ry = Math.max(0.5, (y1 - y0) * 0.3);
+    const ay = Math.max(0, Math.floor(cy - ry)), by = Math.min(sy - 1, Math.ceil(cy + ry));
+    for (let i = 0; i < nx; i++) {
+      const x0 = lx[i], x1 = lx[i+1];
+      const cx = (x0 + x1) / 2, rx = Math.max(0.5, (x1 - x0) * 0.3);
+      const ax = Math.max(0, Math.floor(cx - rx)), bx = Math.min(sx - 1, Math.ceil(cx + rx));
+      if (ax > bx || ay > by) continue;
+      let n = 0, tot = 0;
+      for (let yy = ay; yy <= by; yy++) for (let xx = ax; xx <= bx; xx++) {
+        const k = (yy * sx + xx) * 4;
+        tot++;
+        if (d[k+3]) { cr[n] = d[k]; cg[n] = d[k+1]; cb[n] = d[k+2]; n++; }
+      }
+      if (!n || n * 2 <= tot) continue;            // 多数透明 → 整格透明
+      insSort(cr, n); insSort(cg, n); insSort(cb, n);
+      const m = n >> 1, o = (j * nx + i) * 4;
+      out[o] = cr[m]; out[o+1] = cg[m]; out[o+2] = cb[m]; out[o+3] = 255;
+    }
+  }
+  return { width: nx, height: ny, data: out };
+}
+
+/* 等比降采样（含 alpha 两态化：格内任一源像素不透明 → 不透明取均值，否则透明——
+   对齐 video.py downsample_average 的「任一不透明」口径；多数票会把 1px 细线/细腿整格抹掉）
+   fit=true: contain（等比缩放居中留边，不变形）；fit=false: stretch（直接拉伸到目标） */
+function downsampleContain(id, tw, th, fit = true) {
+  const src = id, sx = src.width, sy = src.height;
+  const out = new Uint8ClampedArray(tw*th*4);
+  const d = src.data;
+  // 目标画布 tw×th 内 contain 源：等效"源窗口"（像素单位）在画布中的位置与大小
+  let wx = 0, wy = 0, ww = tw, wh = th;            // 窗口（输出格为单位）
+  if (fit && sx/sy !== tw/th) {
+    const k = Math.min(tw/sx, th/sy);              // 输出格 / 源像素 比例
+    ww = sx * k; wh = sy * k;
+    wx = (tw - ww) / 2; wy = (th - wh) / 2;
+  }
+  for (let ty=0; ty<th; ty++) for (let tx=0; tx<tw; tx++) {
+    const o = (ty*tw+tx)*4;
+    // 目标格中心在窗口中的位置（输出格单位）→ 归一化 → 源像素坐标
+    const u = (tx + 0.5 - wx) / ww, v = (ty + 0.5 - wy) / wh;
+    if (u < 0 || u >= 1 || v < 0 || v >= 1) { out[o+3]=0; continue; }
+    const x0 = Math.max(0, Math.min(sx-1, Math.floor(u * sx)));
+    const dx = Math.max(1/sx, 1/ww);               // 一格源像素对应窗口宽度（源像素单位）
+    const x1 = Math.max(x0+1, Math.min(sx, Math.floor((u + Math.max(dx, 1/sx)) * sx)));
+    const y0 = Math.max(0, Math.min(sy-1, Math.floor(v * sy)));
+    const y1 = Math.max(y0+1, Math.min(sy, Math.floor((v + Math.max(1/sy, 1/wh)) * sy)));
+    let n=0, r=0,g=0,b=0;
+    for (let yy=y0; yy<y1; yy++) for (let xx=x0; xx<x1; xx++) {
+      const i=(yy*sx+xx)*4;
+      if (d[i+3]) { r+=d[i]; g+=d[i+1]; b+=d[i+2]; n++; }
+    }
+    if (n) { out[o]=r/n|0; out[o+1]=g/n|0; out[o+2]=b/n|0; out[o+3]=255; }
+  }
+  return { width:tw, height:th, data:out };
+}
+
+/* 跨帧共享色板 OKLab k-means（与 video.py/standardize 语义一致，确定性） */
+function buildPaletteK(items, k, iters=24) {  // items: [[r,g,b,n],...]
+  const labs = items.map((it) => ({ c: it, n: it[3], lab: rgbToOklab(it[0],it[1],it[2]) }));
+  labs.sort((a,b) => b.n - a.n);
+  const seeds = [labs[0].lab];
+  const chosen = [0];
+  while (seeds.length < k) {
+    let bi=-1,bd=-1;
+    for (let i=0;i<labs.length;i++) { if (chosen.includes(i)) continue;
+      let d=Infinity; for (const s of seeds) d=Math.min(d, oklabDist2(labs[i].lab,s));
+      if (d>bd){bd=d;bi=i;} }
+    if (bi<0) break;
+    seeds.push(labs[bi].lab); chosen.push(bi);
+  }
+  const assigns = new Array(labs.length).fill(0);
+  for (let it=0; it<iters; it++) {
+    let moved=false;
+    for (let i=0;i<labs.length;i++) {
+      let bi=0,bd=Infinity;
+      for (let j=0;j<seeds.length;j++) { const d=oklabDist2(labs[i].lab,seeds[j]); if (d<bd){bd=d;bi=j;} }
+      if (assigns[i]!==bi){assigns[i]=bi;moved=true;}
+    }
+    // 更新种子（重心，OKLab 平均近似）
+    const acc = seeds.map(()=>[0,0,0,0]);
+    for (let i=0;i<labs.length;i++) { const a=acc[assigns[i]], w=labs[i].n;
+      a[0]+=labs[i].lab[0]*w; a[1]+=labs[i].lab[1]*w; a[2]+=labs[i].lab[2]*w; a[3]+=w; }
+    for (let j=0;j<seeds.length;j++) { const a=acc[j]; if (a[3]) seeds[j]=[a[0]/a[3],a[1]/a[3],a[2]/a[3]]; }
+    if (!moved) break;
+  }
+  return seeds.map((lab) => {  // lab→rgb（近似反变换）
+    const l=lab[0],m=lab[1],s=lab[2];
+    const L=l+0.3963377774*m+0.2158037573*s, M=l-0.1055613458*m-0.0638541728*s, S=l-0.0894841775*m-1.2914855480*s;
+    const l3=L*L*L, m3=M*M*M, s3=S*S*S;
+    const rl=4.0767416621*l3-3.3077115913*m3+0.2309699292*s3,
+          gl=-1.2684380046*l3+2.6097574011*m3-0.3413193965*s3,
+          bl=-0.0041960863*l3-0.7034186147*m3+1.7076147010*s3;
+    const g2 = c => { c = Math.max(0,Math.min(1,c)); return c <= 0.0031308 ? 12.92*c : 1.055*Math.pow(c,1/2.4)-0.055; };
+    return [Math.round(g2(rl)*255), Math.round(g2(gl)*255), Math.round(g2(bl)*255)];
+  });
+}
+function mapToPalette(id, pal) {  // pal: [[r,g,b],...]
+  const d = new Uint8ClampedArray(id.data), w=id.width,h=id.height;
+  const cache = new Map();
+  for (let i=0;i<d.length;i+=4) {
+    if (!d[i+3]) continue;
+    const k = (d[i]<<16)|(d[i+1]<<8)|d[i+2];
+    let c = cache.get(k);
+    if (!c) { const lab=rgbToOklab(d[i],d[i+1],d[i+2]); let bi=0,bd=Infinity;
+      for (let j=0;j<pal.length;j++){ const dd=oklabDist2(lab,rgbToOklab(pal[j][0],pal[j][1],pal[j][2])); if(dd<bd){bd=dd;bi=j;} }
+      c = pal[bi]; cache.set(k,c); }
+    const o=i; d[o]=c[0]; d[o+1]=c[1]; d[o+2]=c[2]; d[o+3]=255;
+  }
+  return { width:w, height:h, data:d };
+}
+
+/* 区域众数色阶分配（可选，替代逐像素最近色）：先在连续色域做区域生长
+   （4 邻、与种子色 OKLab 距离 ≤ sim），再按「逐像素最近色」的票数对每个区域整体定色。
+   连续色域分区比量化后合并更能保住平涂块与干净边界；sim 过大则吞掉色阶细节。 */
+function mapToPaletteRegions(f, pal, sim) {
+  const w = f.width, h = f.height, d = f.data, np = w*h, P = pal.length;
+  const out = new Uint8ClampedArray(d);
+  const lab = new Float32Array(np*3);
+  const vote = new Int32Array(np);
+  const palLab = new Float32Array(P*3);
+  for (let j = 0; j < P; j++) {
+    const L = rgbToOklab(pal[j][0], pal[j][1], pal[j][2]);
+    palLab[j*3] = L[0]; palLab[j*3+1] = L[1]; palLab[j*3+2] = L[2];
+  }
+  // ① 每像素 OKLab + 最近色投票（与 mapToPalette 同口径，作为区域定色的票）
+  for (let p = 0; p < np; p++) {
+    const i = p << 2;
+    if (!d[i+3]) continue;
+    const L = rgbToOklab(d[i], d[i+1], d[i+2]);
+    const l0 = L[0], l1 = L[1], l2 = L[2];
+    lab[p*3] = l0; lab[p*3+1] = l1; lab[p*3+2] = l2;
+    let bi = 0, bd = Infinity;
+    for (let j = 0; j < P; j++) {
+      const dl = l0 - palLab[j*3], da = l1 - palLab[j*3+1], db = l2 - palLab[j*3+2];
+      const dd = dl*dl + da*da + db*db;
+      if (dd < bd) { bd = dd; bi = j; }
+    }
+    vote[p] = bi;
+  }
+  // ② 区域生长（4 邻，只在不透明像素间；以种子色为基准，避免逐格漂移）
+  const label = new Int32Array(np).fill(-1);
+  const head = new Int32Array(np).fill(-1), next = new Int32Array(np).fill(-1);
+  const stack = new Int32Array(np);
+  const sim2 = sim * sim;
+  let nl = 0;
+  for (let s = 0; s < np; s++) {
+    if (label[s] >= 0 || !d[(s<<2)+3]) continue;
+    const sl = s*3, l0 = lab[sl], l1 = lab[sl+1], l2 = lab[sl+2];
+    let sp = 0; stack[sp++] = s; label[s] = nl;
+    while (sp > 0) {
+      const p = stack[--sp];
+      next[p] = head[nl]; head[nl] = p;          // 入区域链表（供 ③ 遍历）
+      const x = p % w, y = (p / w) | 0;
+      for (let k = 0; k < 4; k++) {
+        let q;
+        if (k === 0) { if (y === 0) continue; q = p - w; }
+        else if (k === 1) { if (y === h-1) continue; q = p + w; }
+        else if (k === 2) { if (x === 0) continue; q = p - 1; }
+        else { if (x === w-1) continue; q = p + 1; }
+        if (label[q] >= 0 || !d[(q<<2)+3]) continue;
+        const ql = q*3;
+        const dl = l0 - lab[ql], da = l1 - lab[ql+1], db = l2 - lab[ql+2];
+        if (dl*dl + da*da + db*db <= sim2) { label[q] = nl; stack[sp++] = q; }
+      }
+    }
+    nl++;
+  }
+  // ③ 每区域按票数众数定色（平局取链表先出现者，确定性）
+  const scratch = new Int32Array(P), rcol = new Int32Array(nl);
+  for (let r = 0; r < nl; r++) {
+    scratch.fill(0);
+    let best = 0, bn = -1;
+    for (let p = head[r]; p >= 0; p = next[p]) {
+      const c = ++scratch[vote[p]];
+      if (c > bn) { bn = c; best = vote[p]; }
+    }
+    rcol[r] = best;
+  }
+  // ④ 整区域填色（alpha 沿用原帧，不改轮廓）
+  for (let p = 0; p < np; p++) {
+    const i = p << 2;
+    if (!d[i+3]) continue;
+    const c = pal[rcol[label[p]]];
+    out[i] = c[0]; out[i+1] = c[1]; out[i+2] = c[2];
+  }
+  return { width: w, height: h, data: out };
+}
+/* 基础帧生成：nearest = 旧口径逐像素最近色；region:<sim> = 区域众数。
+   两者只依赖降采样帧 + 共享色板，故缓存的 raw 可复用（改此项不重抽帧）。 */
+function assignBase(frames, pal, mode) {
+  if (!pal || !pal.length) return frames;   // 未量化：无赋值可言
+  if (!mode || mode === 'nearest') return frames.map(f => mapToPalette(f, pal));
+  const sim = +mode.slice(7) || 0.05;       // 'region:0.05' → 0.05
+  return frames.map(f => mapToPaletteRegions(f, pal, sim));
+}
+
+/* ═══ 后处理（可选）：默认全关 = 与旧管线逐位一致，只作用于已量化帧 ═══
+   固定顺序：平涂 → 孤立像素清除 → 时间稳定 → 描边（描边必须最后，否则描边自身会闪） */
+
+function insSort(a, n) {   // 小数组插入排序（n ≤ 25）：逐像素中值不分配临时数组
+  for (let i = 1; i < n; i++) {
+    const v = a[i]; let j = i - 1;
+    while (j >= 0 && a[j] > v) { a[j+1] = a[j]; j--; }
+    a[j+1] = v;
+  }
+}
+/* 平涂：邻域逐通道中值 → 吸附回共享色板（不引入新色），抹平采样造成的麻点。
+   邻域不透明像素不足一半时原样保留——细线/细腿不会被窗口吃掉。 */
+function flattenColors(f, r, pal) {
+  if (!pal || !pal.length) return f;         // 未量化：无稳定色集可吸附（hint 已说明）
+  const w = f.width, h = f.height, src = f.data;
+  const out = new Uint8ClampedArray(src);
+  const cap = (2*r+1)*(2*r+1), need = (cap >> 1) + 1;
+  const cr = new Int32Array(cap), cg = new Int32Array(cap), cb = new Int32Array(cap);
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+    const i = (y*w+x)*4;
+    if (!src[i+3]) continue;
+    const y0 = Math.max(0, y-r), y1 = Math.min(h-1, y+r);
+    const x0 = Math.max(0, x-r), x1 = Math.min(w-1, x+r);
+    let n = 0;
+    for (let yy = y0; yy <= y1; yy++) for (let xx = x0; xx <= x1; xx++) {
+      const j = (yy*w+xx)*4;
+      if (src[j+3]) { cr[n] = src[j]; cg[n] = src[j+1]; cb[n] = src[j+2]; n++; }
+    }
+    if (n < need) continue;
+    insSort(cr, n); insSort(cg, n); insSort(cb, n);
+    const m = n >> 1, mr = cr[m], mg = cg[m], mb = cb[m];
+    let bi = 0, bd = Infinity;
+    for (let p = 0; p < pal.length; p++) {
+      const dr = mr - pal[p][0], dg = mg - pal[p][1], db = mb - pal[p][2];
+      const dd = dr*dr + dg*dg + db*db;
+      if (dd < bd) { bd = dd; bi = p; }
+    }
+    out[i] = pal[bi][0]; out[i+1] = pal[bi][1]; out[i+2] = pal[bi][2];
+  }
+  return { width: w, height: h, data: out };
+}
+/* 孤立像素清除：与四邻颜色全不同者 → 取四邻众数色（平局取先出现者，确定性）。
+   无同色邻居才算孤立；无任何不透明邻居（单像素）时保持原样。 */
+function removeOrphans(f) {
+  const w = f.width, h = f.height, src = f.data;
+  const out = new Uint8ClampedArray(src);
+  const nb = new Int32Array(4);
+  for (let y = 1; y < h-1; y++) for (let x = 1; x < w-1; x++) {
+    const i = (y*w+x)*4;
+    if (!src[i+3]) continue;
+    const c = (src[i]<<16) | (src[i+1]<<8) | src[i+2];
+    nb[0] = (y-1)*w+x; nb[1] = (y+1)*w+x; nb[2] = y*w+x-1; nb[3] = y*w+x+1;
+    let same = false;
+    for (let t = 0; t < 4; t++) {
+      const j = nb[t]*4;
+      if (src[j+3] && (((src[j]<<16)|(src[j+1]<<8)|src[j+2]) === c)) { same = true; break; }
+    }
+    if (same) continue;
+    let best = -1, bn = 0;
+    for (let t = 0; t < 4; t++) {
+      const j = nb[t]*4;
+      if (!src[j+3]) continue;
+      const n = (src[j]<<16)|(src[j+1]<<8)|src[j+2];
+      let cnt = 0;
+      for (let q = 0; q < 4; q++) {
+        const jq = nb[q]*4;
+        if (src[jq+3] && (((src[jq]<<16)|(src[jq+1]<<8)|src[jq+2]) === n)) cnt++;
+      }
+      if (cnt > bn) { bn = cnt; best = n; }
+    }
+    if (best >= 0) { out[i] = (best>>16)&255; out[i+1] = (best>>8)&255; out[i+2] = best&255; }
+  }
+  return { width: w, height: h, data: out };
+}
+/* 时间稳定：窗口内逐像素取众数（颜色索引，透明态 -1 也参与投票），平局保留当前帧。
+   同时稳 alpha 与颜色——只稳颜色的话轮廓边缘仍会闪。 */
+async function temporalStabilize(frames, win, token) {
+  const n = frames.length, r = win >> 1;
+  if (n < 2 || r < 1) return frames;
+  const w = frames[0].width, h = frames[0].height, np = w*h;
+  const seq = frames.map(f => {
+    const d = f.data, a = new Int32Array(np);
+    for (let p = 0, i = 0; p < np; p++, i += 4) a[p] = d[i+3] ? ((d[i]<<16)|(d[i+1]<<8)|d[i+2]) : -1;
+    return a;
+  });
+  const vals = new Int32Array(win), cnts = new Int32Array(win);
+  const out = [];
+  for (let k = 0; k < n; k++) {
+    if (token !== jobToken) throw new Error('aborted');
+    const lo = Math.max(0, k-r), hi = Math.min(n-1, k+r);
+    const cur = seq[k];
+    const d = new Uint8ClampedArray(frames[k].data);
+    for (let p = 0; p < np; p++) {
+      let m = 0;
+      for (let t = lo; t <= hi; t++) {
+        const v = seq[t][p];
+        let q = 0;
+        for (; q < m; q++) if (vals[q] === v) { cnts[q]++; break; }
+        if (q === m) { vals[m] = v; cnts[m] = 1; m++; }
+      }
+      let best = cur[p], bn = 0;
+      for (let q = 0; q < m; q++) if (cnts[q] > bn) { bn = cnts[q]; best = vals[q]; }
+      for (let q = 0; q < m; q++) if (vals[q] === cur[p] && cnts[q] === bn) { best = cur[p]; break; }
+      if (best === cur[p]) continue;
+      const i = p << 2;
+      if (best < 0) d[i+3] = 0;
+      else { d[i] = (best>>16)&255; d[i+1] = (best>>8)&255; d[i+2] = best&255; d[i+3] = 255; }
+    }
+    out.push({ width: w, height: h, data: d });
+    if (k % 24 === 23) { setStatus(`时间稳定 ${k + 1}/${n}…`); await yieldUI(); }
+  }
+  return out;
+}
+/* 1px 描边（从 buildLibrary 抽出）：4 邻不透明判定，写 alpha 边界像素 */
+function drawOutline(f, oc) {
+  const w = f.width, h = f.height;
+  const d = new Uint8ClampedArray(f.data);
+  const op = (x, y) => x >= 0 && y >= 0 && x < w && y < h && d[(y*w+x)*4+3] >= 128;
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+    const i = (y*w+x)*4;
+    if (d[i+3] >= 128 && (!op(x-1,y) || !op(x+1,y) || !op(x,y-1) || !op(x,y+1))) {
+      d[i] = oc[0]; d[i+1] = oc[1]; d[i+2] = oc[2];
+    }
+  }
+  return { width: w, height: h, data: d };
+}
+/* 后处理编排：全关时只走描边 = 旧管线末尾行为 */
+async function applyPost(frames, pal, token) {
+  const flat = +$('flat').value || 0;
+  const orphan = $('orphan').checked;
+  const win = +$('tstab').value || 0;
+  const steps = [];
+  if (flat > 0) steps.push(f => flattenColors(f, flat, pal));
+  if (orphan) steps.push(removeOrphans);
+  let out = frames;
+  for (const step of steps) {
+    const next = [];
+    for (let i = 0; i < out.length; i++) {
+      if (token !== jobToken) throw new Error('aborted');
+      next.push(step(out[i]));
+      if (i % 24 === 23) { setStatus(`空间清理 ${i + 1}/${out.length}…`); await yieldUI(); }
+    }
+    out = next;
+  }
+  if (win > 1) out = await temporalStabilize(out, win, token);
+  if ($('outline').checked) {
+    const oc = hexToRgb($('outlineColor').value);
+    out = out.map(f => drawOutline(f, oc));
+  }
+  return out;
+}
+
+/* 数据统计（updateStats 用：单遍扫描同时取色数与 alpha 两态，长帧序列选轨不卡顿） */
+function analyzeId(id) {
+  const d=id.data, cols=new Map(); let alphaTwo=true;
+  for (let i=0;i<d.length;i+=4){ const a=d[i+3]; if (a!==0&&a!==255) alphaTwo=false; if(!a)continue;
+    const k=(d[i]<<16)|(d[i+1]<<8)|d[i+2]; cols.set(k,(cols.get(k)||0)+1); }
+  return { colors: cols.size, alphaTwo };
+}
+
+/* 时间维滤波（方案 §2；与 standardize.temporal_median_frames 同口径）：
+   逐像素沿时间轴取中值（窗口首尾收缩、不 pad 不循环），alpha 取窗口上中值（≥128 不透明）。
+   **运动感知门**：当前帧与任一相邻帧一致 → 保留当前值（持续 ≥2 帧的变化是真实运动，不算闪烁），
+   只有孤立闪点才被中值替换——否则运动区会被 ±2 帧的旧颜色拖出明显拖影。
+   必须插在跨帧共享色板量化之前——先滤波再映射，色数不增；反之会引入色板外新色。 */
+async function temporalMedianFrames(frames, w, token) {
+  const n = frames.length;
+  w = Math.round(+w || 0);
+  if (w <= 1 || n < 2) return frames;
+  if (w % 2 === 0) w++;
+  const half = w >> 1;
+  const W = frames[0].width, H = frames[0].height;
+  const src = frames.map(f => f.data);
+  const outs = frames.map(() => ({ width: W, height: H, data: new Uint8ClampedArray(W * H * 4) }));
+  const dst = outs.map(o => o.data);
+  for (let y = 0; y < H; y++) {
+    if (token !== undefined && token !== jobToken) throw new Error('aborted');
+    for (let x = 0; x < W; x++) {
+      const p = (y * W + x) * 4;
+      const rr = new Array(n), gg = new Array(n), bb = new Array(n), aa = new Array(n);
+      for (let i = 0; i < n; i++) { const d = src[i]; rr[i] = d[p]; gg[i] = d[p + 1]; bb[i] = d[p + 2]; aa[i] = d[p + 3]; }
+      for (let i = 0; i < n; i++) {
+        const o = dst[i];
+        // 运动感知门：与相邻帧同态（同为透明，或同为不透明且各通道差 ≤ TOL）→ 原样保留。
+        // TOL=24 让运动边缘的过渡色也留下（精确匹配会把过渡色拉回旧色 → 拖影）。
+        const curOpaque = aa[i] > 0;
+        const TOL = 24;
+        const sameAs = j => j >= 0 && j < n && ((aa[j] > 0) === curOpaque) &&
+          (!curOpaque || (Math.abs(rr[j] - rr[i]) <= TOL && Math.abs(gg[j] - gg[i]) <= TOL &&
+                          Math.abs(bb[j] - bb[i]) <= TOL));
+        if (sameAs(i - 1) || sameAs(i + 1)) {
+          o[p] = rr[i]; o[p + 1] = gg[i]; o[p + 2] = bb[i]; o[p + 3] = aa[i];
+          continue;
+        }
+        const lo = Math.max(0, i - half), hi = Math.min(n, i + half + 1);
+        const win = aa.slice(lo, hi).sort((a, b) => a - b);
+        if (win[win.length >> 1] < 128) { o[p] = 0; o[p + 1] = 0; o[p + 2] = 0; o[p + 3] = 0; continue; }
+        const rs = [], gs = [], bs = [];
+        for (let j = lo; j < hi; j++) if (aa[j] > 0) { rs.push(rr[j]); gs.push(gg[j]); bs.push(bb[j]); }
+        if (!rs.length) { o[p + 3] = 0; continue; }
+        rs.sort((a, b) => a - b); gs.sort((a, b) => a - b); bs.sort((a, b) => a - b);
+        const m = rs.length >> 1;
+        o[p] = rs[m]; o[p + 1] = gs[m]; o[p + 2] = bs[m]; o[p + 3] = 255;
+      }
+    }
+    if (y % 8 === 7) { setStatus(`时间维滤波 ${y + 1}/${H}…`); await yieldUI(); }
+  }
+  return outs;
+}
+
+/* 稳定性读数（方案 §1；与 stability.py / tools/stability_report.py 同口径，改一处必同步另一处）：
+   静态格 = 全程 alpha>0 的格；核心静态格 = 静态格中 8 邻域也静态（越界邻域不算）；
+   flipAll/flipCore = 相邻帧对变色格数 /（格数 × 相邻帧对数），单位 %；avgColors = 静态格平均色数。 */
+function computeStability(frames) {
+  const n = frames.length;
+  if (!n) return null;
+  const W = frames[0].width, H = frames[0].height, N = W * H;
+  const opaque = new Uint8Array(N).fill(1);
+  const colors = new Array(N);
+  for (let c = 0; c < N; c++) colors[c] = new Set();
+  for (let i = 0; i < n; i++) {
+    const d = frames[i].data;
+    for (let c = 0; c < N; c++) {
+      const o = c * 4;
+      if (d[o + 3] < 128) opaque[c] = 0;
+      else if (opaque[c]) colors[c].add((d[o] << 16) | (d[o + 1] << 8) | d[o + 2]);
+    }
+  }
+  const core = new Uint8Array(N);
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+    const c = y * W + x;
+    if (!opaque[c]) continue;
+    let ok = true;
+    for (let dy = -1; dy <= 1 && ok; dy++) {
+      const ny = y + dy;
+      if (ny < 0 || ny >= H) { ok = false; break; }
+      for (let dx = -1; dx <= 1; dx++) {
+        const nx = x + dx;
+        if (nx < 0 || nx >= W || !opaque[ny * W + nx]) { ok = false; break; }
+      }
+    }
+    core[c] = ok ? 1 : 0;
+  }
+  let staticCells = 0, coreCells = 0, colorSum = 0;
+  for (let c = 0; c < N; c++) if (opaque[c]) {
+    staticCells++; colorSum += colors[c].size; if (core[c]) coreCells++;
+  }
+  const pairs = Math.max(0, n - 1);
+  let flipAll = 0, flipCore = 0;
+  for (let i = 0; i < pairs; i++) {
+    const a = frames[i].data, b = frames[i + 1].data;
+    for (let c = 0; c < N; c++) {
+      if (!opaque[c]) continue;
+      const o = c * 4;
+      if (a[o] !== b[o] || a[o + 1] !== b[o + 1] || a[o + 2] !== b[o + 2]) {
+        flipAll++; if (core[c]) flipCore++;
+      }
+    }
+  }
+  const pct = (cnt, cells) => (pairs && cells) ? 100 * cnt / (pairs * cells) : 0;
+  return { frames: n, cells: N, pairs, staticCells, coreCells,
+           flipAll: pct(flipAll, staticCells), flipCore: pct(flipCore, coreCells),
+           avgColors: staticCells ? colorSum / staticCells : 0 };
+}
+
+/* 读数挂载点：状态栏像素团指示器旁（方案 §3）——「稳定 9.6% | 色 2.7」 */
+function updateStability(frames) {
+  const el = $('stabState');
+  if (!frames || !frames.length) { el.textContent = ''; el.title = ''; return; }
+  const s = computeStability(frames);
+  if (!s) { el.textContent = ''; return; }
+  el.textContent = `稳定 ${s.flipCore.toFixed(1)}% | 色 ${s.avgColors.toFixed(2)}`;
+  el.title = `核心静态格变色率 ${s.flipCore.toFixed(1)}%（全部静态格 ${s.flipAll.toFixed(1)}%）`
+    + ` · 单格平均色数 ${s.avgColors.toFixed(2)} · 静态格 ${s.staticCells}（核心 ${s.coreCells}）`
+    + ` · ${s.frames} 帧。门禁见 pixcli stability`;
+  el.style.color = s.staticCells < 50 ? 'var(--warn)' : 'var(--sub)';
+  if (s.staticCells < 50) el.textContent += '（样本不足）';
+}
+
+/* ═══════════════ UI 层 ═══════════════ */
+/* V.tracks：每轨道 = 源视频一段区间，持有自己的 raw/processed 帧缓存与独立播放状态；
+   区间允许任意重叠，主预览跟随「聚焦」轨道，每轨道缩略图独立播放 */
+const V = { video:null, url:null, dur:0, tracks:[], activeTrack:0, lib:null, paramGen:0, postGen:0, trackSeq:0, trackUnit:'time' };
+/* 后处理参数：只重跑量化/清理、不改采样——改动时无需重抽帧（复用 V.lib.raw 重跑即可） */
+const POST_IDS = new Set(['assign','flat','orphan','tstab']);
+
+function setStatus(msg, err) { $('status').textContent = msg; $('status').style.color = err ? 'var(--warn)' : 'var(--sub)'; }
+
+/* ─── 脏状态像素团指示器（stage-head 右侧）：红=未添加视频 / 黄=有未处理的修改 / 绿=已与当前参数同步。
+   方块律动复用 asset-inspector footer pixbeat 的对角波呼吸（4px 方块+1px 间隙、确定性相位/速度） ─── */
+const PixSync = (() => {
+  const PITCH = 5, SQ = 4, ROWS = 3, COLS = 12;   // 60×15px 像素团
+  const PAIRS = {   // 每格明暗色对：红=--bad 系 / 黄=--warn 系 / 绿=--ok 系，主色 + 灰阶次色
+    empty: [[[46, 14, 16], [229, 72, 77]],  [[34, 16, 18], [142, 74, 76]]],
+    dirty: [[[46, 34, 12], [217, 154, 61]], [[32, 26, 12], [128, 94, 42]]],
+    clean: [[[12, 38, 22], [39, 166, 68]],  [[22, 30, 25], [76, 126, 94]]],
+  };
+  const LABEL = { empty: '待添加', dirty: '待处理', clean: '已同步' };
+  const COLOR = { empty: 'var(--bad)', dirty: 'var(--warn)', clean: 'var(--ok)' };
+  let cv = null, ctx = null, cells = [], raf = 0, state = 'empty';
+  const reduced = typeof matchMedia !== 'undefined' && matchMedia('(prefers-reduced-motion: reduce)').matches;
+  function build() {
+    cells = [];
+    for (let y = 0; y < ROWS; y++) for (let x = 0; x < COLS; x++) {
+      const r = ((x + 1) * 73856093 ^ (y + 1) * 19349663) >>> 0;   // 确定性：每格相位/速度/色对固定
+      cells.push({ pair: r % 10 < 7 ? 0 : 1, phase: (r % 628) / 100, speed: 0.9 + (r % 7) / 7 * 0.5 });
+    }
+    const dpr = Math.max(1, window.devicePixelRatio || 1);
+    cv.width = COLS * PITCH * dpr; cv.height = ROWS * PITCH * dpr;
+    cv.style.width = COLS * PITCH + 'px'; cv.style.height = ROWS * PITCH + 'px';
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  }
+  const smooth = s => { s = Math.min(1, Math.max(0, (s - 0.18) / 0.64)); return s * s * (3 - 2 * s); };  // 两端多停留，中段快过渡
+  function draw(t) {
+    const ps = PAIRS[state];
+    ctx.clearRect(0, 0, COLS * PITCH, ROWS * PITCH);
+    for (let y = 0; y < ROWS; y++) for (let x = 0; x < COLS; x++) {
+      const c = cells[y * COLS + x];
+      const s = smooth(0.5 + 0.5 * Math.sin(t * c.speed + c.phase + (x + y) * 0.34));   // 对角波 + 每格相位差
+      const a = ps[c.pair][0], b = ps[c.pair][1];
+      ctx.fillStyle = 'rgb(' + Math.round(a[0] + (b[0] - a[0]) * s) + ',' + Math.round(a[1] + (b[1] - a[1]) * s) + ',' + Math.round(a[2] + (b[2] - a[2]) * s) + ')';
+      ctx.fillRect(x * PITCH, y * PITCH, SQ, SQ);        // 方块贴格左上，右/下各留 1px 间隙（整像素不虚边）
+    }
+  }
+  function loop(ts) { draw(ts / 1000); raf = requestAnimationFrame(loop); }
+  function set(s) {
+    state = s;
+    if (!cv) { cv = $('pixsync'); if (!cv) return; ctx = cv.getContext('2d'); build(); }
+    cv.hidden = false;
+    const el = $('syncState');
+    el.textContent = LABEL[s];
+    el.style.color = COLOR[s];
+    if (reduced) { draw(0); return; }                    // 减弱动效：只画静态一帧
+    if (!raf) raf = requestAnimationFrame(loop);
+  }
+  return { set };
+})();
+
+/* --- 加载视频 --- */
+function loadVideoFile(file) {
+  if (busy) { setStatus('处理中，请等当前处理结束再加载新视频', true); return; }
+  if (V.url) URL.revokeObjectURL(V.url);
+  V.url = URL.createObjectURL(file);
+  const v = document.createElement('video');
+  v.muted = true; v.preload = 'auto'; v.src = V.url;
+  v.onloadedmetadata = () => {
+    V.video = v; V.dur = v.duration || 0;
+    V.trackSeq = 0;
+    V.lib = null;
+    stopAllTracks();                       // 先停旧轨道的计时器，再替换轨道数组（顺序不可反）
+    V.tracks = [makeTrack(0, V.dur)];
+    V.activeTrack = 0;
+    resetStage();
+    $('frameIdx').max = 0; $('frameNo').textContent = '0/0';
+    $('playbtn').disabled = true;
+    updateStats(activeTrack());
+    updateStability(null);   // 新素材：稳定性读数待处理后再出
+    updateExportsNote();
+    renderTracks(); drawRuler();
+    PixSync.set('dirty');   // 素材就绪、尚未处理：红「待添加」→ 黄「待处理」
+    $('vmeta').textContent =
+      `${file.name}\n尺寸 ${v.videoWidth}×${v.videoHeight} · 时长 ${V.dur.toFixed(2)}s · 浏览器解码`;
+    setStatus(`已加载：${V.dur.toFixed(2)}s，调整轨道后点「▶ 处理」`);
+  };
+  v.onerror = () => setStatus('视频解码失败（编码/容器不支持；MOV 建议转 MP4，用 Chrome/Edge）', true);
+}
+
+/* ─── 轨道模型与编辑器（类剪辑软件：拖区块移动 / 拖边缘裁剪 / 播放头区间内预览） ─── */
+function clamp(v, a, b) { return Math.min(b, Math.max(a, v)); }
+function activeTrack() { return V.tracks[V.activeTrack] || null; }
+function fpsValue() { return Math.min(120, Math.max(1, +$('fps').value || 24)); }   // 上限护栏：抽帧数 = 时长×fps，防误填撑爆内存
+function capSize(v) { return Math.min(1024, Math.max(1, Math.round(+v) || 1)); }   // 输出尺寸护栏（1024×1024 已是像素动画上限）
+function makeTrack(t0, t1) {
+  return { id: ++V.trackSeq, t0, t1, playT: t0, fidx: 0, _els: null };
+}
+/* 当前轨道自己的帧序列（帧数 = 区间时长 × fps，与导出/统计的 remapFrames 同口径）；
+   帧号滑杆与「n/m」计数按它走——素材库是全量的，直接用库下标会与轨道区间脱节 */
+function trackFrameCount(T) { return T ? Math.max(1, Math.round((T.t1 - T.t0) * fpsValue())) : 0; }
+function trackFrameTime(T, j) { return T.t0 + (j + 0.5) * (T.t1 - T.t0) / trackFrameCount(T); }
+/* ─── 全量素材库（V.lib）：处理一次 = 整个视频 [0, dur] 的像素化结果，所有轨道共享。
+   轨道区间只是素材上的裁剪引用——预览/播放/导出按 新时刻 → 素材覆盖 重映射帧号，
+   区间调整永远即时生效、直接导出，无需重处理 ─── */
+function libFrames() { return V.lib && V.lib.processed && V.lib.processed.length ? V.lib.processed : null; }
+function libStale() {   // 素材需重建：未处理 / 帧率变了 / 采样参数变了 / 后处理参数变了（区间调整不影响素材）
+  return !V.lib || fpsValue() !== V.lib.covFps || V.lib.prGen !== V.paramGen || V.lib.poGen !== V.postGen;
+}
+function frameIdxAt(time) {   // 时刻 → 素材帧号（超出覆盖定格首/末帧）
+  const lib = libFrames();
+  const n = lib ? lib.length : 0;
+  if (!n) return 0;
+  const u = clamp((time - V.lib.cov0) / Math.max(1e-6, V.lib.cov1 - V.lib.cov0), 0, 1);
+  return Math.min(n - 1, Math.floor(u * n));
+}
+function remapFrames(T) {   // 当前区间的帧序列（素材库裁剪；帧数 = 区间时长 × fps）
+  const lib = libFrames();
+  if (!T || !lib) return null;
+  const m = Math.max(1, Math.round((T.t1 - T.t0) * fpsValue()));
+  const out = [];
+  for (let j = 0; j < m; j++) {
+    const t = T.t0 + (j + 0.5) * (T.t1 - T.t0) / m;
+    out.push(lib[frameIdxAt(t)]);
+  }
+  return out;
+}
+function syncIndicator() {   // 红=未加载视频；黄=全量素材待(重)处理；绿=可用
+  if (!V.video) { PixSync.set('empty'); return; }
+  PixSync.set(libStale() ? 'dirty' : 'clean');
+}
+function addTrack() {
+  if (!V.video || !V.dur) { setStatus('请先加载视频', true); return; }
+  V.tracks.push(makeTrack(0, V.dur));   // 新轨道默认整段：独立裁剪，不占位、不互斥（允许与其他轨道重叠）
+  renderTracks();
+  selectTrack(V.tracks.length - 1);
+  syncIndicator();
+}
+function deleteTrack(idx) {
+  if (V.tracks.length <= 1) return;   // 至少保留一条轨道
+  stopTrack(V.tracks[idx]);           // 停掉被删轨道的播放
+  V.tracks.splice(idx, 1);
+  if (idx < V.activeTrack) V.activeTrack--;
+  V.activeTrack = clamp(V.activeTrack, 0, V.tracks.length - 1);
+  renderTracks();
+  if (libFrames()) { $('frameIdx').max = Math.max(0, trackFrameCount(activeTrack()) - 1); showActiveFrame(); }
+  else { $('frameIdx').max = 0; $('frameNo').textContent = '0/0'; }
+  updateStats(activeTrack());
+  updateExportsNote();
+  syncIndicator();
+}
+function selectTrack(idx) {
+  if (idx === V.activeTrack) { updateExportsNote(); return; }
+  V.activeTrack = idx;   // 聚焦切换不打断其他轨道的播放（轨道播放互不影响）
+  document.querySelectorAll('#tracks .tl').forEach((el, i) => el.classList.toggle('sel', i === idx));
+  if (libFrames()) { $('frameIdx').max = Math.max(0, trackFrameCount(activeTrack()) - 1); showActiveFrame(); }
+  else { $('frameIdx').max = 0; $('frameNo').textContent = '0/0'; }
+  $('playbtn').textContent = activeTrack() && activeTrack().playing ? '⏸ 暂停' : '▶ 播放';
+  updateStats(activeTrack());
+  updateExportsNote();
+}
+function renderTracks() {
+  const box = $('tracks'); box.innerHTML = '';
+  if (!V.video) {
+    box.innerHTML = '<div class="note" style="padding:2px 2px 0">加载视频后点「+ 添加轨道」；每条轨道独立播放、独立导出</div>';
+    return;
+  }
+  V.tracks.forEach((tr, i) => {
+    const row = document.createElement('div'); row.className = 'trow';
+    const play = document.createElement('button'); play.className = 'mini tplay';
+    play.title = '播放/暂停该轨道（各轨道互不影响）';
+    play.disabled = !libFrames();
+    play.textContent = tr.playing ? '⏸' : '▶';
+    play.onclick = () => playTrack(tr);
+    const lane = document.createElement('div'); lane.className = 'tl' + (i === V.activeTrack ? ' sel' : '');
+    const clip = document.createElement('div'); clip.className = 'tclip';
+    const label = document.createElement('span'); label.className = 'tlabel';
+    const gL = document.createElement('div'); gL.className = 'tgrip L';
+    const gR = document.createElement('div'); gR.className = 'tgrip R';
+    const head = document.createElement('div'); head.className = 'thead';
+    clip.append(label, gL, gR);
+    lane.append(clip, head);
+    const thumb = document.createElement('canvas'); thumb.className = 'tthumb';
+    thumb.width = 36; thumb.height = 36;
+    const del = document.createElement('button'); del.className = 'mini tdel'; del.textContent = '✕';
+    del.title = '删除该轨道'; del.disabled = V.tracks.length <= 1;
+    del.onclick = () => deleteTrack(i);
+    row.append(play, lane, thumb, del);
+    box.append(row);
+    tr._els = { lane, clip, label, head, play, thumb };
+    paintTrack(tr, i);
+    showTrackFrame(tr);
+    bindLane(lane, tr, i);
+  });
+}
+function paintTrack(tr, i) {
+  const { clip, label, head } = tr._els;
+  clip.style.left = (tr.t0 / V.dur * 100) + '%';
+  clip.style.width = Math.max(0.4, (tr.t1 - tr.t0) / V.dur * 100) + '%';
+  label.textContent = V.trackUnit === 'frames'
+    ? `#${i + 1} · ${Math.round(tr.t0 * fpsValue())}~${Math.round(tr.t1 * fpsValue())}f`
+    : `#${i + 1} · ${tr.t0.toFixed(2)}~${tr.t1.toFixed(2)}s`;
+  head.style.left = (tr.playT / V.dur * 100) + '%';
+}
+let scrubHintT = 0;
+function scrubTo(tr, t) {   // 播放头定位：已处理 → 逐帧预览；未处理 → 提示（限频）
+  tr.playT = clamp(t, tr.t0, tr.t1);
+  if (tr._els) tr._els.head.style.left = (tr.playT / V.dur * 100) + '%';
+  const lib = libFrames();
+  const n = lib ? lib.length : 0;
+  if (n && tr === activeTrack()) {
+    tr.fidx = frameIdxAt(tr.playT);   // 区间改动后实时重映射（无需重处理）
+    showActiveFrame();
+  } else if (tr === activeTrack() && performance.now() - scrubHintT > 1500) {
+    scrubHintT = performance.now();
+    setStatus('该轨道尚未处理：先「▶ 处理」，播放头拖动才能预览帧', true);
+  }
+}
+function bindLane(lane, tr, idx) {   // 命中区：播放头 scrub > 左右裁剪耳 > 区块内移动/点击 > 区块外仅选中
+  lane.onpointerdown = e => {
+    if (e.button !== 0 || !V.dur) return;
+    e.preventDefault();
+    selectTrack(idx);
+    const rect = lane.getBoundingClientRect();
+    const xToT = x => clamp((x - rect.left) / rect.width * V.dur, 0, V.dur);
+    const px = s => rect.left + s / V.dur * rect.width;
+    const t = xToT(e.clientX);
+    const headX = px(tr.playT);
+    const nearL = Math.abs(e.clientX - px(tr.t0)) <= 9;
+    const nearR = Math.abs(e.clientX - px(tr.t1)) <= 9;
+    let mode = null;
+    if (Math.abs(e.clientX - headX) <= 7) mode = 'scrub';
+    else if (nearL && !nearR) mode = 'L';
+    else if (nearR && !nearL) mode = 'R';
+    else if (t >= tr.t0 && t <= tr.t1) mode = 'move';
+    const start = { x: e.clientX, t0: tr.t0, t1: tr.t1 };
+    let moved = false, scrubbed = false;
+    if (mode === 'scrub') { scrubbed = true; stopTrack(tr); scrubTo(tr, t); }   // 拖播放头先停该轨道播放
+    try { lane.setPointerCapture(e.pointerId); } catch (_) {}
+    const onMove = ev => {
+      if (Math.abs(ev.clientX - start.x) > 3) moved = true;
+      const dt = (ev.clientX - start.x) / rect.width * V.dur;
+      if (mode === 'L') tr.t0 = clamp(start.t0 + dt, 0, tr.t1 - 0.1);
+      else if (mode === 'R') tr.t1 = clamp(start.t1 + dt, tr.t0 + 0.1, V.dur);
+      else if (mode === 'move') {
+        const len = start.t1 - start.t0;
+        tr.t0 = clamp(start.t0 + dt, 0, Math.max(0, V.dur - len));
+        tr.t1 = tr.t0 + len;
+      }
+      else if (mode === 'scrub') { scrubbed = true; scrubTo(tr, xToT(ev.clientX)); return; }
+      if (mode && mode !== 'scrub') {
+        tr.playT = clamp(tr.playT, tr.t0, tr.t1);
+        paintTrack(tr, idx);
+      }
+    };
+    const onUp = () => {
+      lane.removeEventListener('pointermove', onMove);
+      lane.removeEventListener('pointerup', onUp);
+      lane.removeEventListener('pointercancel', onUp);
+      if (mode === 'move' && !moved && !scrubbed) scrubTo(tr, t);   // 原地点击区块 = 定位播放头
+      if (mode && mode !== 'scrub') {
+        tr.playT = clamp(tr.playT, tr.t0, tr.t1);
+        paintTrack(tr, idx);
+        syncIndicator();   // 覆盖内裁剪 → 保持绿可直接导出；超出覆盖 → 黄（待补抽）
+      }
+    };
+    lane.addEventListener('pointermove', onMove);
+    lane.addEventListener('pointerup', onUp);
+    lane.addEventListener('pointercancel', onUp);
+  };
+}
+
+function refreshTrackDisplay() {   // 单位/帧率变化：重绘刻度尺 + 刷新区块标签
+  drawRuler();
+  V.tracks.forEach((tr, i) => { if (tr._els) paintTrack(tr, i); });
+}
+
+/* --- 时间刻度尺（轨道区的共享时间轴；单位可切换 时间/帧数） --- */
+function drawRuler() {
+  const cv = $('truler'); if (!cv) return;
+  const w = cv.clientWidth || 0, h = 16, dpr = Math.max(1, window.devicePixelRatio || 1);
+  cv.width = Math.max(1, Math.round(w * dpr)); cv.height = Math.round(h * dpr);
+  const c = cv.getContext('2d'); c.setTransform(dpr, 0, 0, dpr, 0, 0);
+  c.clearRect(0, 0, w, h);
+  if (!w || !V.dur) return;
+  c.font = '10px Inter,"SF Pro Text",system-ui,sans-serif'; c.textBaseline = 'top';
+  const tick = (f, label) => {   // f = 帧号（0..total），label 已含单位
+    const x = Math.round(f / total * (w - 1));
+    c.fillStyle = '#565a61'; c.fillRect(x, 12, 1, 4);   // 半步小刻度
+    c.fillStyle = 'rgba(216,221,230,.45)'; c.fillRect(x, 9, 1, 7);
+    c.fillStyle = '#8a8f98';
+    c.fillText(label, Math.min(x + 3, w - 24), 0);
+  };
+  const total = Math.max(1, Math.round(V.dur * fpsValue()));
+  let incFrames, labelOf;
+  if (V.trackUnit === 'frames') {
+    incFrames = [1, 2, 5, 10, 20, 50, 100, 200, 500, 1000].find(s => total / s <= 10) || 2000;
+    labelOf = f => f + 'f';
+  } else {
+    const steps = [0.1, 0.2, 0.5, 1, 2, 5, 10, 15, 30, 60, 120, 300];
+    const tStep = steps.find(s => V.dur / s <= 10) || 600;
+    incFrames = Math.max(1, Math.round(tStep * fpsValue()));
+    labelOf = f => { const t = f / fpsValue(); return (tStep < 1 ? t.toFixed(1) : String(Math.round(t))) + 's'; };
+  }
+  for (let f = 0; f <= total; f += incFrames) tick(f, labelOf(f));
+}
+
+/* --- 视频抓帧：seek 到指定时刻，抓取原始分辨率 ImageData（串行调用安全） --- */
+function grabFrame(t) {
+  const v = V.video; if (!v) return Promise.resolve(null);
+  return new Promise(res => {
+    let done = false;
+    const finish = () => { if (!done) { done = true; v.removeEventListener('seeked', finish); res(frameToImageData(v)); } };
+    v.addEventListener('seeked', finish);
+    v.currentTime = Math.max(0, Math.min(t, V.dur - 0.001));
+    setTimeout(finish, 1200);   // 兜底（seek 相同时间不触发 seeked 时）
+  });
+}
+
+function frameToImageData(src) {
+  const w = src.videoWidth || src.naturalWidth || src.width;
+  const h = src.videoHeight || src.naturalHeight || src.height;
+  const c = document.createElement('canvas'); c.width=w; c.height=h;
+  const cc = c.getContext('2d', { willReadFrequently:true });
+  cc.drawImage(src,0,0);
+  return cc.getImageData(0,0,w,h);
+}
+
+/* --- 全量处理（流式）：整个视频 [0, dur] 一次性像素化成共享素材库（V.lib）。
+   内存上只保留处理后的 64×64 级帧，原始帧即抓即弃：
+   ① 采样 ≤32 帧取全片抠像 bbox 并集 → 固定参考框（帧间共享裁剪窗 → 主体位置稳定）；
+      开启「原生网格」时同步累积梯度剖面 → FFT 估源图像素网格（周期 + 相位）；
+   ② 逐帧 seek → 抓帧 → 抠像 → 裁剪 → [原生网格重采样] → 降采样 → 质量池累积；
+   ③ 跨帧共享色板量化 → 基础帧（对齐 video.py：量化在降采样后，描边占 1 个色数配额）；
+   返回 { raw, pal }：raw = 降采样帧（量化输入），pal = 共享色板。
+   ④ 由 assignBase（逐像素/区域众数）→ applyPost（空间清理/时间稳定/描边）收尾。
+   raw + pal 缓存在 V.lib：改色阶分配/后处理参数时免重抽帧，直接重跑（毫秒级）。 --- */
+async function buildLibrary(token) {
+  const v = V.video; if (!v) return [];
+  const fps = fpsValue();
+  const n = Math.max(1, Math.round(V.dur * fps));
+  const k = Math.min(64, Math.max(0, +$('colors').value || 0));
+  const fit = $('fit').checked;
+  const cw = capSize(+$('cw').value || 64), ch = capSize(+$('ch').value || 64);
+  const dx = +($('dx').value || 0)|0, dy = +($('dy').value || 0)|0;
+  const key = $('key').value;
+  const ow = capSize(+$('ow').value || 64), oh = capSize(+$('oh').value || 64);
+  const gridOn = $('grid').checked;
+
+  // ① 采样 ≤32 帧（含端点分布覆盖运动包络）合并参考框；同时逐帧累积梯度剖面供网格检测
+  let ref = null;
+  const profX = gridOn ? [] : null, profY = gridOn ? [] : null;
+  const S = Math.min(32, n);
+  for (let s = 0; s < S; s++) {
+    if (token !== jobToken) throw new Error('aborted');
+    const im = await grabFrame((s + 0.5) * V.dur / S);
+    if (!im) continue;
+    const keyed = keyApply(im, key);
+    if (profX && profX.length < 12) {                 // 每帧单独存剖面（平均谱需要逐帧）
+      const acc = { x: new Float64Array(v.videoWidth || 0), y: new Float64Array(v.videoHeight || 0) };
+      gradProfile(keyed, acc);
+      profX.push(acc.x); profY.push(acc.y);
+    }
+    const b = alphaStats(keyed).bbox;
+    if (!b) continue;
+    ref = ref ? [Math.min(ref[0],b[0]), Math.min(ref[1],b[1]), Math.max(ref[2],b[2]), Math.max(ref[3],b[3])] : b;
+    if (s % 8 === 7 || s === S - 1) { setStatus(`分析构图 ${s + 1}/${S}…`); await yieldUI(); }
+  }
+  if (!ref) ref = [0, 0, (v.videoWidth || 64) - 1, (v.videoHeight || 64) - 1];
+  const M = Math.round(Math.max(8, (ref[2]-ref[0])*0.02));   // 边距 ~2%（防边缘裁切、留呼吸）
+  ref = [Math.max(0,ref[0]-M), Math.max(0,ref[1]-M), ref[2]+M, ref[3]+M];
+
+  // ①.5 网格检测：相位换算到裁剪框坐标系并生成覆盖整幅的网格线（网格固定在源帧空间）
+  let grid = null;
+  if (gridOn) {
+    if (profX && profX.length >= 3) {
+      const g = detectGrid(profX, profY);
+      if (g) {
+        const mk = (p, o, span) => {
+          const out = [];
+          for (let x = o - Math.ceil(o / p) * p; x <= span; x += p) out.push(x);
+          if (out[out.length - 1] < span) out.push(out[out.length - 1] + p);
+          return out;
+        };
+        const ox = ((g.ox - ref[0]) % g.px + g.px) % g.px;
+        const oy = ((g.oy - ref[1]) % g.py + g.py) % g.py;
+        grid = { px: g.px, py: g.py, lx: mk(g.px, ox, ref[2] - ref[0]), ly: mk(g.py, oy, ref[3] - ref[1]) };
+      }
+    }
+    const gi = $('gridInfo');
+    if (grid) gi.textContent = `网格 ${grid.px.toFixed(2)}×${grid.py.toFixed(2)}px → ${grid.lx.length-1}×${grid.ly.length-1} 格`;
+    else gi.textContent = '未检出稳定网格（两轴无显著共峰）→ 已按常规降采样';
+  } else {
+    $('gridInfo').textContent = '未启用；开启后按源图原生像素网格采样（需源存在稳定网格）';
+  }
+
+  // ② 逐帧流式处理（峰值内存 ≈ 1 帧原始图 + 全部 64×64 级产物）
+  const raw64 = [];
+  const pooled = new Map();
+  for (let i = 0; i < n; i++) {
+    if (token !== jobToken) throw new Error('aborted');
+    const im = await grabFrame((i + 0.5) * V.dur / n);
+    if (!im) continue;
+    let img = keyApply(im, key);
+    img = cropToBox(img, ref);
+    if (grid) img = resampleOnGrid(img, grid.lx, grid.ly);   // 原生网格：先还原到源像素网格
+    img = downsampleContain(img, ow, oh, fit);
+    img = placeOnCanvas(img, cw, ch, dx, dy);   // 不做形心锚定（源位置亚像素稳定，锚定反而制造台阶抖动）
+    raw64.push(img);
+    const d = img.data;
+    for (let j = 0; j < d.length; j += 4) { if (!d[j+3]) continue;
+      const k2=(d[j]<<16)|(d[j+1]<<8)|d[j+2]; pooled.set(k2,(pooled.get(k2)||0)+1); }
+    if (i % 8 === 7 || i === n - 1) { setStatus(`抽帧 ${i + 1}/${n}…`); await yieldUI(); }
+  }
+  if (!raw64.length) return [];
+
+  // ②b 时间维滤波（在共享色板量化之前：先滤波再映射，色数不增）
+  const tw = Math.max(0, Math.round(+$('temporal').value || 0));
+  let frames64 = raw64;
+  if (tw > 1) {
+    setStatus(`时间维滤波（窗口 ${tw} 帧）…`); await yieldUI();
+    frames64 = await temporalMedianFrames(raw64, tw, token);
+    pooled.clear();   // 色板改用滤波后的色分布（中值结果取自窗口内已有色，色数不增）
+    for (const f of frames64) {
+      const d = f.data;
+      for (let j = 0; j < d.length; j += 4) {
+        if (!d[j + 3]) continue;
+        const k2 = (d[j] << 16) | (d[j + 1] << 8) | d[j + 2];
+        pooled.set(k2, (pooled.get(k2) || 0) + 1);
+      }
+    }
+  }
+
+  // ③ 跨帧共享色板量化 → 基础帧（后处理的输入；描边放到 ④ 之后，避免描边自身闪烁）
+  const outline = $('outline').checked;
+  let pal = [];
+  if (k > 0) {
+    const items = Array.from(pooled, ([k2,n2]) => [(k2>>16)&255,(k2>>8)&255,k2&255,n2]);
+    const kk = Math.max(1, k - (outline?1:0));
+    pal = items.length ? buildPaletteK(items, Math.min(kk, items.length)) : [];
+  }
+  return { raw: frames64, pal };   // ④ 色阶分配 + 后处理 + 描边由 processAllTracks 收尾（raw 已过时间维滤波）
+}
+
+function hexToRgb(h) { return [parseInt(h.slice(1,3),16), parseInt(h.slice(3,5),16), parseInt(h.slice(5,7),16)]; }
+
+/* --- 预览：canvas 播放已处理帧（位图 = 整数倍放大保锐利；CSS 尺寸超出舞台时等比收缩防裁切） --- */
+function renderFrame(f, scale) {
+  const stage = $('vstage'); let cv = stage.querySelector('canvas');
+  if (!cv) { cv = document.createElement('canvas'); stage.replaceChild(cv, $('prev')); }
+  const s = Math.max(1, Math.min(16, Math.round(scale) || 1));
+  cv.width = f.width * s; cv.height = f.height * s;   // 画布位图尺寸跟随缩放（imageSmoothing 关闭保像素边）
+  const c = cv.getContext('2d'); c.imageSmoothingEnabled = false;
+  c.clearRect(0,0,cv.width,cv.height);
+  c.drawImage(imageDataToCanvas(f), 0, 0, cv.width, cv.height);
+  // CSS 尺寸按位图固有比例自适应：超宽/超高时等比缩到舞台内（宽度≤舞台宽、高度≤46vh，与占位 img 一致）
+  const availW = Math.max(1, stage.clientWidth - 2);
+  const availH = Math.max(1, window.innerHeight * 0.46);
+  const fit = Math.min(1, availW / cv.width, availH / cv.height);
+  cv.style.width = Math.max(1, Math.round(cv.width * fit)) + 'px';
+  cv.style.height = '';
+}
+/* 取键色模式：原始帧适配舞台展示。bitmap 保持原始分辨率，CSS contain 缩放（≤4×），
+   点击坐标经 getBoundingClientRect ↔ 原始像素精确对应 */
+function renderPickFrame(id) {
+  const stage = $('vstage'); let cv = stage.querySelector('canvas');
+  if (!cv) { cv = document.createElement('canvas'); stage.replaceChild(cv, $('prev')); }
+  cv.width = id.width; cv.height = id.height;
+  cv.getContext('2d').putImageData(new ImageData(id.data, id.width, id.height), 0, 0);
+  const availW = Math.max(1, stage.clientWidth - 2);
+  const availH = Math.max(1, window.innerHeight * 0.46);
+  const fit = Math.min(availW / id.width, availH / id.height, 4);
+  cv.style.width = Math.max(1, Math.round(id.width * fit)) + 'px';
+  cv.style.height = '';
+}
+function exitPick(restore) {   // 结束取色：还原预览（已处理 → 当前帧；未处理 → 空舞台）
+  pickingKey = false; pickFrame = null;
+  if (!restore) return;
+  if (libFrames()) showActiveFrame();
+  else resetStage();
+}
+const frameCanvasCache = new WeakMap();   // 帧对象 → 离屏 canvas（播放逐帧复用，免每 tick 新建）
+function imageDataToCanvas(id) {
+  let c = frameCanvasCache.get(id);
+  if (!c) {
+    c = document.createElement('canvas'); c.width=id.width; c.height=id.height;
+    c.getContext('2d').putImageData(new ImageData(id.data, id.width, id.height),0,0);
+    frameCanvasCache.set(id, c);
+  }
+  return c;
+}
+function resetStage() {   // 新视频加载：移除旧画布，恢复占位 <img>（renderFrame 依赖 #prev 存在）
+  const stage = $('vstage'); const cv = stage.querySelector('canvas');
+  if (cv) cv.remove();
+  if (!$('prev')) {
+    const img = document.createElement('img'); img.id = 'prev';
+    img.style.cssText = 'max-width:100%;max-height:46vh';
+    stage.appendChild(img);
+  }
+}
+
+function updateStats(T) {
+  const t = $('fstats'); t.innerHTML = '';
+  const frames = remapFrames(T) || [];   // 统计 = 当前区间导出内容（与导出一致）
+  let two = true, worst = 0;             // 单遍扫描（长帧序列选轨/处理完不卡顿）
+  for (const f of frames) { const s = analyzeId(f); if (!s.alphaTwo) two = false; if (s.colors > worst) worst = s.colors; }
+  const rows = [
+    ['轨道', T ? `#${V.tracks.indexOf(T)+1}（${(T.t1-T.t0).toFixed(2)}s）` : '-'],
+    ['帧数', frames.length || '-'],
+    ['帧尺寸', frames.length ? `${frames[0].width}×${frames[0].height}` : '-'],
+    ['色数（最大帧）', frames.length ? worst : '-'],
+    ['alpha 两态', frames.length ? (two ? '✅' : '❌') : '-'],
+  ];
+  for (const [k,v] of rows) { const tr=document.createElement('tr'); tr.innerHTML=`<td>${k}</td><td>${v}</td>`; t.appendChild(tr); }
+}
+
+/* --- 导出（全部作用于当前选中轨道，文件名带轨道号） --- */
+function dataUrl(frame) { return imageDataToCanvas(frame).toDataURL('image/png'); }
+function downloadBlob(name, blob) {   // Blob 下载：统一创建/释放 object URL（10s 回收，大文件下载不被过早截断）
+  const u = URL.createObjectURL(blob);
+  const a = document.createElement('a'); a.href = u; a.download = name; a.click();
+  setTimeout(() => URL.revokeObjectURL(u), 10000);
+}
+function expFrames() {   // 导出 = 当前区间内容（全量素材库裁剪，与预览一致），区间调整即时生效
+  const T = activeTrack();
+  const frames = remapFrames(T);
+  if (!frames) { setStatus(`轨道 #${V.activeTrack+1} 尚未处理：先「▶ 处理」再导出`, true); return null; }
+  return frames;
+}
+function expName(suf) { return `track${V.activeTrack+1}_${suf}`; }
+
+function exportHtml() {
+  const frames = expFrames(); if (!frames) return;
+  const w=frames[0].width,h=frames[0].height;
+  const list = frames.map(f => dataUrl(f));
+  const script = "<"+"script>" +
+    "const F=" + JSON.stringify(list) + ",cv=document.getElementById('cv'),cc=cv.getContext('2d');" +
+    "let i=0,timer=null,playing=false;cc.imageSmoothingEnabled=false;" +
+    "function draw(){const im=new Image();im.onload=()=>{cc.clearRect(0,0,cv.width,cv.height);cc.drawImage(im,0,0)};im.src=F[i];document.getElementById('fi').textContent=(i+1)+'/'+F.length;}" +
+    "function step(){draw();i=(i+1)%F.length;}" +
+    "function play(){if(playing)return;playing=true;draw();timer=setInterval(step,1000/(+document.getElementById('fps').value||12));document.getElementById('pl').textContent='⏸';}" +
+    "function pause(){playing=false;clearInterval(timer);document.getElementById('pl').textContent='▶';}" +
+    "document.getElementById('pl').onclick=()=>playing?pause():play();" +
+    "document.getElementById('prev').onclick=()=>{pause();i=(i-1+F.length)%F.length;draw();};" +
+    "document.getElementById('next').onclick=()=>{pause();i=(i+1)%F.length;draw();};" +
+    "document.getElementById('z').oninput=e=>{const s=+e.target.value;cv.style.width=(cv.width*s)+'px';cv.style.height=(cv.height*s)+'px';};" +
+    "draw();play();" +
+    "<"+"/script>";
+  const frameCount = frames.length;
+  const fps = fpsValue();
+  const html = '<!DOCTYPE html><html><head><meta charset="utf-8"><title>Pixel Animation</title>' +
+    '<style>body{background:#111;color:#eee;font-family:system-ui;display:flex;flex-direction:column;align-items:center;gap:10px;padding:20px}' +
+    'canvas{image-rendering:pixelated;background:repeating-conic-gradient(#333 0 25%,#222 0 50%) 0 0/24px 24px}' +
+    '.controls{display:flex;gap:8px;flex-wrap:wrap}button{background:#333;color:#eee;border:1px solid #555;padding:4px 10px;cursor:pointer}</style></head><body>' +
+    '<h3>Pixel Animation（' + frameCount + ' 帧 / ' + w + '×' + h + '）</h3><canvas id="cv" width="' + w + '" height="' + h + '"></canvas>' +
+    '<div class="controls"><button id="pl">⏸</button><label>FPS</label><input id="fps" type="number" value="' + fps + '" min="1" style="width:56px">' +
+    '<label>缩放</label><input id="z" type="range" min="1" max="8" value="4" style="width:100px"><button id="prev">◀</button><button id="next">▶</button><span id="fi"></span></div>' +
+    script + '</body></html>';
+  downloadBlob(expName('player.html'), new Blob([html], { type: 'text/html;charset=utf-8' }));   // Blob 而非 data URL（大帧数不撞 URL 长度上限）
+}
+
+function exportGif() {
+  const frames = expFrames(); if (!frames) return;
+  const w=frames[0].width, h=frames[0].height;
+  // 帧延迟：GIF 单位 1/100s；<2 会被多数查看器钳到 10（反而变慢），故下限 2
+  const delay = Math.max(2, Math.round(100 / Math.max(1, +$('fps').value || 12)));
+  const gif = new GIFEncoder({ width:w, height:h, delay });
+  gif.begin();
+  for (const f of frames) gif.addFrame(f);
+  gif.finish();
+  downloadBlob(expName('animation.gif'), gif.blob);
+}
+
+/* Aseprite JSON Hash（契约 §2）：trimmed=false、spriteSourceSize==frame==sourceSize、
+   pivot=脚底水平中心、逐帧 duration(ms)、frameTags 定循环语义、sourceRoute=来源路线；
+   与 atlas.py build_meta 同构（对拍见 tools/parity_frontend.py） */
+function sheetMeta(frames, cols, rows, imageName, tag, sourceRoute) {
+  const w = frames[0].width, h = frames[0].height, n = frames.length;
+  const dur = Math.max(1, Math.round(1000 / Math.max(1, +$('fps').value || 12)));
+  const pad = Math.max(2, String(n - 1).length);
+  const fr = {};
+  for (let i = 0; i < n; i++) {
+    const key = `${tag}_${String(i).padStart(pad, '0')}`;
+    fr[key] = {
+      frame: { x: (i % cols) * w, y: Math.floor(i / cols) * h, w, h },
+      rotated: false, trimmed: false,
+      spriteSourceSize: { x: 0, y: 0, w, h }, sourceSize: { w, h }, duration: dur,
+    };
+  }
+  return { frames: fr, meta: {
+    image: imageName, format: 'RGBA8888', size: { w: w * cols, h: h * rows }, scale: '1',
+    pivot: { x: w / 2, y: h - 1 },
+    sourceRoute: sourceRoute || 'sampled',   // 视频工作台产物 = 采样路线
+    frameTags: [{ name: tag, from: 0, to: n - 1, direction: 'forward' }],
+  } };
+}
+
+function exportSheet() {
+  const frames = expFrames(); if (!frames) return;
+  const w=frames[0].width,h=frames[0].height;
+  const MAX = 32767;   // 跨浏览器画布单边上限（Firefox 32767 / Chrome 65535）：超限 toBlob 静默返回 null
+  let cols = frames.length, rows = 1;
+  if (w * frames.length > MAX) {
+    cols = Math.max(1, Math.floor(MAX / w));
+    rows = Math.ceil(frames.length / cols);
+    if (rows * h > MAX) { setStatus(`帧数过多（${frames.length} 帧）无法放进单张画布（上限 ${MAX}px）：请缩小轨道区间，或改用「ZIP（PNG 打包）」`, true); return; }
+    setStatus(`帧数超单行上限：已按 ${cols} 列 × ${rows} 行网格排布`);
+  }
+  const c=document.createElement('canvas');c.width=w*cols;c.height=h*rows;
+  const cc=c.getContext('2d');cc.imageSmoothingEnabled=false;
+  frames.forEach((f,i)=>cc.drawImage(imageDataToCanvas(f), (i%cols)*w, Math.floor(i/cols)*h));
+  const png = expName('sheet.png');
+  const meta = sheetMeta(frames, cols, rows, png, `track${V.activeTrack+1}`);
+  c.toBlob(b=>{ if (!b) { setStatus('Sprite Sheet 编码失败（画布超浏览器上限）', true); return; }
+    downloadBlob(png, b);
+    downloadBlob(expName('sheet.json'), new Blob([JSON.stringify(meta, null, 2)],
+      { type: 'application/json;charset=utf-8' }));   // 元数据随 sheet 一起交付（契约 §1 四件套）
+  }, 'image/png');
+}
+
+function exportPngs() {
+  const frames = expFrames(); if (!frames) return;
+  // 逐个下载（浏览器限制同批下载数时提示）
+  let i=0;
+  const next=()=>{ if(i>=frames.length) return;
+    const a=document.createElement('a'); a.href=dataUrl(frames[i]); a.download=expName(`frame_${String(i).padStart(3,'0')}.png`); a.click(); i++;
+    if (i<60) setTimeout(next,120); else setStatus('已触发 60 帧下载；剩余帧请用「导出 ZIP」打包', false); };
+  next();
+}
+
+/* 最小 ZIP（STORE 无压缩）：PNG 帧打包为一个 zip 下载（无需第三方库） */
+function exportZip() {
+  const frames = expFrames(); if (!frames) return;
+  const files = frames.map((f,i) => ({ name:`frame_${String(i).padStart(3,'0')}.png`, blob: imageDataToCanvas(f).toDataURL('image/png') }));
+  const chunks = [];
+  let offset = 0;
+  const enc = new TextEncoder();
+  const central = [];
+  const crcTable = [];
+  for (let n=0;n<256;n++){ let c=n; for(let k=0;k<8;k++) c = (c&1) ? (0xEDB88320 ^ (c>>>1)) : (c>>>1); crcTable[n]=c>>>0; }
+  const crc32 = (bytes) => { let c=0xFFFFFFFF; for (const b of bytes) c = crcTable[(c^b)&255] ^ (c>>>8); return (c^0xFFFFFFFF)>>>0; };
+  for (const f of files) {
+    const data = atob(f.blob.split(',')[1]);
+    const bin = new Uint8Array(data.length);
+    for (let i=0;i<data.length;i++) bin[i]=data.charCodeAt(i);
+    const name = enc.encode(f.name);
+    const crc = crc32(bin);
+    const lh = new Uint8Array(30+name.length);
+    const dv = new DataView(lh.buffer);
+    dv.setUint32(0,0x04034b50,true); dv.setUint16(4,20,true); dv.setUint16(6,0,true); dv.setUint16(8,0,true);   // method 0 = STORE（数据未压缩，写 8 会导致 zip 损坏）
+    dv.setUint32(14,crc,true); dv.setUint32(18,bin.length,true); dv.setUint32(22,bin.length,true);
+    dv.setUint16(26,name.length,true); dv.setUint16(28,0,true);
+    lh.set(name,30);
+    chunks.push(lh, bin);
+    const ch = new Uint8Array(46+name.length);
+    const cdv = new DataView(ch.buffer);
+    cdv.setUint32(0,0x02014b50,true); cdv.setUint16(4,20,true); cdv.setUint16(6,20,true);
+    // 中央目录字段偏移：16=CRC、20=压缩后尺寸、24=原始尺寸、28=文件名长、42=本地头偏移（此前整体错位导致 zip 损坏）
+    cdv.setUint32(16,crc,true); cdv.setUint32(20,bin.length,true); cdv.setUint32(24,bin.length,true);
+    cdv.setUint16(28,name.length,true);
+    cdv.setUint32(42,offset,true);
+    ch.set(name,46);
+    central.push(ch);
+    offset += lh.length + bin.length;
+  }
+  const cenSize = central.reduce((s,c)=>s+c.length,0);
+  const eocd = new Uint8Array(22);
+  const edv = new DataView(eocd.buffer);
+  edv.setUint32(0,0x06054b50,true); edv.setUint16(8,files.length,true); edv.setUint16(10,files.length,true);
+  edv.setUint32(12,cenSize,true); edv.setUint32(16,offset,true);
+  const blob = new Blob([...chunks, ...central, eocd], {type:'application/zip'});
+  downloadBlob(expName('frames.zip'), blob);
+}
+
+/* GIF 编码器（全局调色板 + LZW）——帧为 {width,height,data}（RGBA，alpha 两态） */
+class GIFEncoder {
+  constructor({width,height,delay}) { this.w=width; this.h=height; this.delay=delay||4; this.frames=[]; }
+  begin() {}
+  addFrame(imgData) { this.frames.push(imgData); }
+  finish() { this.blob = this.#encode(); }
+  #encode() { return gifEncode(this.w, this.h, this.frames, this.delay); }
+}
+
+/* GIF89a 编码（LZW + 全局调色板）：帧序列 → Blob。
+   全局色表（索引 0=透明）+ NETSCAPE 无限循环 + 每帧 GCE（disposal=2 恢复透明背景，
+   防上一帧残影）。LZW 根码宽必须覆盖全部调色板索引（不能固定 2）。
+   >255 色时保留出现频次最高的 255 色，超出色兜底映射到 1 号色。 */
+function gifEncode(w, h, frameDataArr, delayCs) {
+  const colorCount = new Map();
+  for (const fd of frameDataArr) {
+    const d = fd.data;
+    for (let i=0;i<d.length;i+=4) { if (d[i+3] < 128) continue;
+      const k=(d[i]<<16)|(d[i+1]<<8)|d[i+2]; colorCount.set(k,(colorCount.get(k)||0)+1); }
+  }
+  const all = Array.from(colorCount, ([k,n])=>[(k>>16)&255,(k>>8)&255,k&255,n]);
+  let items = all;                                        // [r,g,b,出现次数]
+  if (all.length > 255) items = all.sort((a,b)=>b[3]-a[3]).slice(0,255);   // 像素动画常见 ≤64 色，此分支极少触发
+  const pal = items.map(c=>[c[0],c[1],c[2]]);            // 剥离计数字节（带 n 写色表会越界/污染下一项）
+  const idxOf = new Map();
+  pal.forEach((c,i)=>idxOf.set((c[0]<<16)|(c[1]<<8)|c[2], i+1));   // 颜色→1..；0 留给透明
+  // 色表项数 = 2 的幂（含透明索引），上限 256
+  const tblSize = Math.min(256, 2 ** Math.ceil(Math.log2(Math.max(2, pal.length + 1))));
+  const sizeField = Math.log2(tblSize) - 1;             // 0..7，写进 LSD 的 packed 字节
+  const gct = new Uint8Array(tblSize*3);                // 全 0 初始化：索引 0 透明（0,0,0）
+  pal.forEach((c,i)=>{ gct.set(c, (i+1)*3); });
+
+  const bytes = [0x47,0x49,0x46,0x38,0x39,0x61];        // GIF89a
+  const put16 = v => { bytes.push(v&255, (v>>8)&255); };
+  put16(w); put16(h);
+  bytes.push(0x80 | sizeField, 0, 0);                   // 全局色表标志+尺寸 / 背景索引 / 宽高比
+  for (const b of gct) bytes.push(b);
+  // NETSCAPE2.0 循环扩展：无限循环（缺失时部分查看器只播一遍）
+  bytes.push(0x21,0xFF,0x0B, ...Array.from('NETSCAPE2.0',c=>c.charCodeAt(0)), 0x03,0x01,0,0, 0x00);
+
+  const dLo = delayCs & 255, dHi = (delayCs>>8) & 255;
+  const lzwMin = Math.max(2, Math.log2(tblSize));       // 根码宽 ≥2 且覆盖全部调色板索引
+  for (const fd of frameDataArr) {
+    const d = fd.data;
+    const idx = new Uint8Array(w*h);
+    for (let i=0;i<d.length;i+=4) {
+      const p = i/4;
+      if (d[i+3] < 128) { idx[p]=0; continue; }
+      idx[p] = idxOf.get((d[i]<<16)|(d[i+1]<<8)|d[i+2]) || 1;
+    }
+    // GCE 共 8 字节：disposal=2（清屏恢复背景）+ 透明标志 + 透明索引 0 + 延迟
+    bytes.push(0x21,0xF9,0x04,0x09, dLo, dHi, 0x00, 0x00);
+    // 图像描述 packed=0：无局部色表、无隔行
+    bytes.push(0x2C); put16(0); put16(0); put16(w); put16(h); bytes.push(0);
+    const lzw = lzwEncode(idx, lzwMin);
+    bytes.push(lzwMin);
+    for (let i=0;i<lzw.length;i+=255) { const chunk=lzw.slice(i,i+255); bytes.push(chunk.length); for (const b of chunk) bytes.push(b); }
+    bytes.push(0);
+  }
+  bytes.push(0x3B);  // trailer
+  return new Blob([new Uint8Array(bytes)], {type:'image/gif'});
+}
+
+function lzwEncode(indices, minCodeSize) {
+  const clearCode = 1 << minCodeSize, eoiCode = clearCode+1;
+  let codeSize = minCodeSize+1, nextCode = eoiCode+1;
+  // 词条表：(前缀码 << 8) | 下一像素 → 新码。数值键代替字符串拼接（长键哈希在大画布下显著更慢）
+  const dict = new Map();
+  const resetDict = () => { dict.clear(); codeSize = minCodeSize+1; nextCode = eoiCode+1; };
+  let bitBuf=0, bitCnt=0;
+  const outBytes=[];
+  const writeCode = (code, sz) => { bitBuf |= code << bitCnt; bitCnt += sz; while (bitCnt >= 8) { outBytes.push(bitBuf & 255); bitBuf >>= 8; bitCnt -= 8; } };
+  // 码宽提升的时机是关键：解码端每收到一个码才补写一条词条，整体比编码端滞后一码，
+  // 因此必须在「发码之后、写新词条之前」判断加宽；若放到新增词条之后再加宽，会提前
+  // 一码切换位宽使解码端位流失步 → 帧内容错乱（与 Weiner LZWEncoder 的 output() 同序）。
+  const emit = (code) => { writeCode(code, codeSize); if (nextCode >= (1<<codeSize) && codeSize < 12) codeSize++; };
+  resetDict();
+  writeCode(clearCode, codeSize);
+  let prev = -1;   // 当前前缀的码（-1 = 尚未起始；根码即像素值本身）
+  for (let i=0;i<indices.length;i++) {
+    const k = indices[i];
+    if (prev < 0) { prev = k; continue; }
+    const key = (prev << 8) | k;
+    const hit = dict.get(key);
+    if (hit !== undefined) { prev = hit; continue; }
+    emit(prev);
+    if (nextCode >= 4096) { writeCode(clearCode, codeSize); resetDict(); }   // 词条表满：发 clear 重建
+    else dict.set(key, nextCode++);
+    prev = k;
+  }
+  if (prev >= 0) emit(prev);
+  writeCode(eoiCode, codeSize);
+  if (bitCnt) outBytes.push(bitBuf & 255);
+  return outBytes;
+}
+
+/* ─── 主逻辑绑定 ─── */
+/* ─── 全量处理：整个视频 [0, dur] 一次性像素化成共享素材库；轨道区间只是其上的裁剪引用 ─── */
+let busy = false;
+let jobToken = 0;   // 处理任务代次：递增即请求停止当前处理（在让出点检查生效）
+/* 让出主线程让状态文字有机会绘制。不用 rAF：面板被遮挡时 visibilityState 仍报 visible 但 rAF 会被
+   暂停，导致处理永久卡死；MessageChannel 宏任务在任何可见性/遮挡状态下都准时 resolve */
+const yieldUI = () => new Promise(rr => {
+  const ch = new MessageChannel();
+  ch.port1.onmessage = () => { ch.port1.close(); rr(); };
+  ch.port2.postMessage(0);
+});
+async function processAllTracks() {
+  if (busy) return; busy = true;
+  const token = ++jobToken;
+  $('pbtn').textContent = '■ 停止';   // 处理中再点 = 停止（见 pbtn.onclick）
+  try {
+    stopAllTracks();
+    await yieldUI();
+    // 仅色阶分配/后处理参数变了 → 复用已缓存降采样帧，免重新 seek 视频（两种风格瞬时对比）
+    const reuse = V.lib && V.lib.raw && V.lib.raw.length && V.lib.prGen === V.paramGen && V.lib.covFps === fpsValue();
+    let libData;
+    if (reuse) {
+      setStatus('应用后处理…'); await yieldUI();
+      libData = { raw: V.lib.raw, pal: V.lib.pal };
+    } else {
+      setStatus('标准化中…'); await yieldUI();
+      libData = await buildLibrary(token);
+    }
+    const assignMode = $('assign').value;
+    const base = (reuse && V.lib.base && V.lib.assignMode === assignMode)
+      ? V.lib.base : assignBase(libData.raw, libData.pal, assignMode);
+    const processed = await applyPost(base, libData.pal, token);
+    if (!processed.length) { setStatus('未抽到帧（检查视频时长/帧率）', true); return; }
+    V.lib = { raw: libData.raw, pal: libData.pal, base, assignMode, processed, cov0: 0, cov1: V.dur, covFps: fpsValue(), prGen: V.paramGen, poGen: V.postGen };
+    V.tracks.forEach(tr => { tr.playT = clamp(tr.playT, tr.t0, tr.t1); tr.fidx = frameIdxAt(tr.playT); });
+    afterProcess();
+  } catch (e) {
+    if (e && e.message === 'aborted') setStatus('已停止：素材保持上一次结果', true);
+    else setStatus('处理失败: ' + (e && e.message || e), true);
+  } finally { busy = false; jobToken++; $('pbtn').disabled = false; $('pbtn').textContent = '▶ 处理'; }
+}
+function afterProcess() {
+  const lib = libFrames();
+  const has = !!lib;
+  $('frameIdx').max = has ? Math.max(0, trackFrameCount(activeTrack()) - 1) : 0;
+  $('playbtn').disabled = !has;
+  V.tracks.forEach(tr => { if (tr._els) { tr._els.play.disabled = !has; showTrackFrame(tr); } });
+  if (has) showActiveFrame();
+  else $('frameNo').textContent = '0/0';
+  updateStats(activeTrack());
+  updateStability(lib);
+  updateExportsNote();
+  syncIndicator();
+  if (has) setStatus(`完成：全量素材 ${lib.length} 帧（${lib[0].width}×${lib[0].height}，覆盖 0~${V.dur.toFixed(2)}s），区间随意调整即时生效`);
+}
+function showActiveFrame() {
+  const T = activeTrack();
+  const lib = libFrames();
+  if (!T || !lib) return;
+  if (!Number.isInteger(T.fidx) || T.fidx < 0 || T.fidx >= lib.length) T.fidx = 0;   // NaN/越界防御
+  renderFrame(lib[T.fidx], +$('zoomN').value || 4);
+  const m = trackFrameCount(T);   // 滑杆/帧号按当前轨道帧序列计数（与导出一致）
+  const j = clamp(Math.floor((T.playT - T.t0) / Math.max(1e-6, T.t1 - T.t0) * m), 0, m - 1);
+  $('frameIdx').value = j;
+  $('frameNo').textContent = (j + 1) + '/' + m;
+  if (T._els) T._els.head.style.left = (T.playT / V.dur * 100) + '%';
+  showTrackFrame(T);
+}
+function showTrackFrame(tr) {   // 轨道缩略图 = 该轨道自己的当前帧
+  if (!tr._els) return;
+  const lib = libFrames();
+  if (!lib) return;
+  const frame = lib[tr.fidx] || lib[0];
+  const c = tr._els.thumb.getContext('2d');
+  c.imageSmoothingEnabled = false;
+  c.clearRect(0, 0, tr._els.thumb.width, tr._els.thumb.height);
+  if (frame) c.drawImage(imageDataToCanvas(frame), 0, 0, tr._els.thumb.width, tr._els.thumb.height);
+}
+/* ─── 每轨道独立播放：各自计时器互不影响，可同时播放；主预览只跟随聚焦轨道 ─── */
+function updatePlayBtn(tr) {
+  if (tr._els) tr._els.play.textContent = tr.playing ? '⏸' : '▶';
+  if (tr === activeTrack()) $('playbtn').textContent = tr.playing ? '⏸ 暂停' : '▶ 播放';
+}
+function playTrack(tr) {
+  if (!libFrames()) { setStatus('尚未处理：点「▶ 处理」生成全量素材', true); return; }
+  if (tr.playing) { stopTrack(tr); return; }
+  tr.playing = true;
+  updatePlayBtn(tr);
+  const fps = fpsValue();
+  tr.timer = setInterval(() => {
+    if (!libFrames()) { stopTrack(tr); return; }
+    tr.playT += 1 / fps;   // 播放头按当前区间推进，帧内容经 frameIdxAt 从素材库实时重映射
+    if (tr.playT >= tr.t1) tr.playT = tr.t0;
+    tr.fidx = frameIdxAt(tr.playT);
+    showTrackFrame(tr);   // 各轨道缩略图各播各的
+    if (tr._els) tr._els.head.style.left = (tr.playT / V.dur * 100) + '%';
+    if (tr === activeTrack()) showActiveFrame();   // 主画面只演聚焦轨道
+  }, 1000 / fps);
+}
+function stopTrack(tr) {
+  if (tr.timer) { clearInterval(tr.timer); tr.timer = null; }
+  if (!tr.playing) return;
+  tr.playing = false;
+  updatePlayBtn(tr);
+}
+function stopAllTracks() { V.tracks.forEach(stopTrack); }
+
+/* ─── 参数变化 → 采样参数变了要重抽帧；后处理参数只重跑清理（复用 base，毫秒级）；
+   点「▶ 处理」统一应用；覆盖内拖拽区间实时重映射，不算过期 ─── */
+function onParamChange(id) {
+  if (POST_IDS.has(id)) V.postGen++; else V.paramGen++;
+  syncIndicator();
+}
+
+function buildExports() {
+  const box = $('exports'); box.innerHTML='';
+  const defs = [
+    ['expHtml', 'HTML 播放器', exportHtml],
+    ['expGif', 'GIF', exportGif],
+    ['expSheet', 'Sprite Sheet', exportSheet],
+    ['expPngs', 'PNG 序列', exportPngs],
+    ['dlZip', 'ZIP（PNG 打包）', exportZip],
+  ];
+  for (const [id,label,fn] of defs) {
+    const b = document.createElement('button');
+    b.textContent = label;
+    b.onclick = () => { try { fn(); } catch(e) { setStatus('导出失败: '+e.message, true); } };
+    box.appendChild(b);
+  }
+  updateExportsNote();
+}
+function updateExportsNote() {
+  $('expNote').textContent = V.video
+    ? `导出当前选中轨道 #${V.activeTrack+1}（点上述按钮逐个下载）。`
+    : '点「▶ 处理」后在此生成导出项。';
+}
+
+/* ─── 初始化：事件绑定 ─── */
+function init() {
+  PixSync.set('empty');   // 打开页面即亮红「待添加」（未加载视频）
+  // 拖拽拦截：document 级兜底（防止拖到非 drop 区浏览器直接打开文件）+ drop 区高亮
+  const onDocDragOver = e => { e.preventDefault(); if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy'; };
+  document.addEventListener('dragover', onDocDragOver);
+  document.addEventListener('drop', e => e.preventDefault());
+  $('drop').addEventListener('dragover', e => { e.preventDefault(); $('drop').classList.add('hover'); });
+  $('drop').addEventListener('dragleave', () => $('drop').classList.remove('hover'));
+  $('drop').addEventListener('drop', e => { e.preventDefault(); e.stopPropagation(); $('drop').classList.remove('hover'); const f=e.dataTransfer.files[0]; if (f) loadVideoFile(f); });
+  $('file').onchange = e => { const f = e.target.files[0]; e.target.value = ''; if (f) loadVideoFile(f); };   // 清空 value：同文件再次选择也触发 change
+  $('addTrack').onclick = addTrack;
+  window.addEventListener('resize', drawRuler);
+  document.querySelectorAll('[data-fps]').forEach(b => b.onclick = () => { $('fps').value = b.dataset.fps; onParamChange('fps'); });
+
+  // 主体位置移动（每步 1px）
+  const MV = 1;
+  $('mvL').onclick = () => { $('dx').value = (+$('dx').value||0) - MV; onParamChange('dx'); };
+  $('mvR').onclick = () => { $('dx').value = (+$('dx').value||0) + MV; onParamChange('dx'); };
+  $('mvU').onclick = () => { $('dy').value = (+$('dy').value||0) - MV; onParamChange('dy'); };
+  $('mvD').onclick = () => { $('dy').value = (+$('dy').value||0) + MV; onParamChange('dy'); };
+  $('mvReset').onclick = () => { $('dx').value = 0; $('dy').value = 0; onParamChange('dx'); };
+
+  $('pbtn').onclick = () => {
+    if (!V.video) { setStatus('请先加载视频', true); return; }
+    if (busy) { jobToken++; setStatus('停止中…'); return; }   // 处理中再点 = 请求停止
+    if (!libStale()) { setStatus('全量素材已与当前参数同步，无需处理'); return; }
+    processAllTracks();
+  };
+  $('playbtn').onclick = () => { const T = activeTrack(); if (T) playTrack(T); };
+  $('frameIdx').oninput = e => {
+    const T = activeTrack();
+    const lib = libFrames();
+    if (!T || !lib) return;
+    stopTrack(T);   // 拖滑杆手动定位时停掉该轨道播放
+    const m = trackFrameCount(T);
+    const j = clamp(Math.round(+e.target.value) || 0, 0, m - 1);
+    T.playT = trackFrameTime(T, j);   // 轨道内第 j 帧 → 时刻 → 素材库帧号
+    T.fidx = frameIdxAt(T.playT);
+    showActiveFrame();
+  };
+  $('zoom').oninput = e => { $('zoomN').value = e.target.value; if (libFrames()) showActiveFrame(); };
+  $('zoomN').oninput = e => { $('zoom').value = e.target.value; if (libFrames()) showActiveFrame(); };
+
+  // 幕色抠像：custom 自由取色（点击预览读原始帧像素 / 选色器任意色）
+  const updateKeyVis = () => { $('customRow').hidden = $('key').value !== 'custom'; };
+  $('key').addEventListener('change', () => {
+    updateKeyVis();
+    if ($('key').value === 'custom' && !CUSTOM_TEST) setStatus('custom 模式：点「取键色」后点击画面，或用选色器选任意键色');
+  });
+  updateKeyVis();
+  $('pickKey').onclick = () => {
+    if (busy) { setStatus('处理中，稍后再取色', true); return; }
+    if (!V.video || !V.dur) { setStatus('请先加载视频', true); return; }
+    stopAllTracks();   // 取色期间暂停各轨道播放（主画布让给取色画面）
+    pickingKey = true;
+    const T = activeTrack();
+    setStatus('取键色：正在截取画面…');
+    grabFrame(T ? T.playT : 0).then(frame => {   // 按需现抓播放头时刻的原始帧（含处理前）
+      if (!pickingKey) return;
+      pickFrame = frame;
+      renderPickFrame(frame);
+      setStatus('取键色：点击预览画面（读原始帧像素），Esc 取消');
+    });
+  };
+  $('vstage').addEventListener('click', e => {
+    if (!pickingKey || !pickFrame) return;
+    const cv = $('vstage').querySelector('canvas');
+    if (!cv) return;
+    const raw = pickFrame;
+    const r = cv.getBoundingClientRect();
+    const x = Math.floor((e.clientX - r.left) / r.width * raw.width);
+    const y = Math.floor((e.clientY - r.top) / r.height * raw.height);
+    if (x < 0 || y < 0 || x >= raw.width || y >= raw.height) return;
+    const i = (y * raw.width + x) * 4;
+    if (setCustomKey([raw.data[i], raw.data[i+1], raw.data[i+2]])) {
+      setStatus('键色 = ' + $('keyColor').value + '（已标脏，点「▶ 处理」生效）');
+      exitPick(true);
+    } else setStatus('该色主通道不显著：换个位置点击，或 Esc 取消');   // 保持取色态让用户重试
+  });
+  $('keyColor').addEventListener('input', e => setCustomKey(hexToRgb(e.target.value)));
+  document.addEventListener('keydown', e => {
+    if (e.key === 'Escape' && pickingKey) {
+      exitPick(true);
+      setStatus('已取消取键色');
+    }
+  });
+
+  // 处理参数：改动使全量素材过期（黄色像素团），点「▶ 处理」重新生成；区间调整不在此列（实时重映射）
+  // assign/flat/orphan/tstab = 色阶分配与后处理参数：只重跑量化/清理、不重抽帧（onParamChange 按 POST_IDS 分流）
+  // temporal/grid = 采样阶段参数：改动需重抽帧（进 paramGen）
+  ['fps','ow','oh','cw','ch','dx','dy','colors','temporal','fit','grid','outline','outlineColor','key','assign','flat','orphan','tstab'].forEach(id => {
+    $(id).addEventListener('input', () => { onParamChange(id); if (id === 'fps') refreshTrackDisplay(); });
+  });
+
+  // 轨道显示单位：时间 / 帧数（刻度尺 + 区块标签）
+  $('trackUnit').addEventListener('change', e => { V.trackUnit = e.target.value; refreshTrackDisplay(); });
+
+  buildExports();   // 导出按钮静态构建（未处理时点击会提示先处理）
+  renderTracks();   // 空态提示（加载视频后再渲染真实轨道）
+  drawRuler();
+}
+
+document.addEventListener('DOMContentLoaded', init);
+
+</script>
+</body>
+</html>

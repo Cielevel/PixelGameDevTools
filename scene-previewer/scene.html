@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>场景预览台 · Scene Previewer v0.1.0</title>
+<style>
+  body { background:#14151f; color:#a1a3c0; font:13px/1.6 system-ui,sans-serif; margin:0; padding:16px; }
+  h1 { font-size:15px; color:#dfd9c3; margin:0 0 8px; font-weight:600; }
+  #bar { margin:0 0 10px; display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
+  button { background:#303148; color:#dfd9c3; border:1px solid #4d4e6c; border-radius:4px; padding:3px 12px; cursor:pointer; }
+  button:hover { background:#3e3f59; }
+  #zoom { min-width:40px; text-align:center; color:#4ed4e8; display:inline-block; }
+  #stage { display:inline-block; border:1px solid #4d4e6c; line-height:0; }
+  canvas { display:block; image-rendering:pixelated; }
+  .hint { color:#6d6f8f; margin:10px 0 0; max-width:900px; }
+  #status.err { color:#f8894b; }
+</style>
+</head>
+<body>
+<h1>场景预览台 · Scene Previewer <span style="color:#6d6f8f;font-size:12px;font-weight:400">v0.1.0</span></h1>
+<div id="bar">
+  <button id="minus">−</button><span id="zoom">1×</span><button id="plus">＋</button>
+  <button id="fit">适应窗口</button>
+  <label><input type="checkbox" id="grid"> 踩格线</label>
+  <span id="status">加载中…</span>
+</div>
+<div id="stage"><canvas id="cv" width="640" height="352"></canvas></div>
+<p class="hint">用途：素材在游戏内比例/观感的正式视检环境（避免"放大看"认知偏差）。支持静态贴图与分层帧动画（本体帧+花层帧同钟逐帧合成）；新增素材只改本文件底部 SCENE 数据；缩放只取整数倍（最近邻，禁平滑）。</p>
+<script>
+'use strict';
+// ════ 场景数据（唯一需要编辑的地方）══════════════════════════
+// 以下为最小示例（指向不存在的资产时状态栏显示"加载失败"，属正常——把路径换成目标工程资产即可）。
+// 约定：canvas 逻辑分辨率 = 游戏参考分辨率口径（tile 32px 需整除画布宽高）；
+//       tilesets 字符 → 32×32 单帧 sheet；map 每字符一格；
+//       sprite 的 x = 水平中心、y = 脚底所踏地面线（图片底边对齐该线）；
+//       动画精灵 frames = 帧序列，每帧为"层列表"（自下而上 alpha 叠加，如 [本体帧, 配件帧]），
+//       单一时钟按 fps 推进帧号——分层动画的分层数据在此合成播放。
+const P  = '../../assets/sprites/player/';
+const seq = (prefix, n) => [...Array(n)].map((_, i) => P + prefix + '_' + String(i).padStart(2, '0') + '.png');
+const zip = (a, b) => {
+  if (a.length !== b.length) console.warn(`[scene-previewer] 本体 ${a.length} 帧与配件 ${b.length} 帧数量不一致：按本体 ${a.length} 帧合成，不足侧该帧跳绘（配件多出的帧被忽略）。请核对帧序列。`);
+  return a.map((s, i) => [s, b[i]]);   // 以本体为主动画，配件帧不足时该帧只显示本体
+};
+
+// 示例：本体帧 + 配件帧 同钟合成（换成你的帧前缀与帧数）
+const IDLE = seq('hero_idle', 6), ACC = seq('hero_acc_aura_idle', 6);
+
+const SCENE = {
+  canvas: { w: 640, h: 352 },
+  tilesets: {
+    '.': '../../assets/tiles/floor_sheet.png',   // 字符 → 32×32 单帧 sheet
+  },
+  map: [
+    '....................',
+    '....................',
+    '....................',
+    '....................',
+    '....................',
+    '....................',
+    '....................',
+    '....................',
+    '....................',
+    '....................',
+    '....................',
+  ],
+  sprites: [
+    // ── 静态贴图（比例参照）──
+    { name: 'static 示例', src: P + 'npc_static_00.png', x: 150, y: 246 },
+    // ── 分层帧动画：本体帧 + 配件帧 同钟合成 ──
+    { name: 'hero+acc (idle 8fps)', frames: zip(IDLE, ACC), fps: 8, x: 276, y: 258 },
+  ],
+};
+
+// ════ 渲染器（一般不用改）════════════════════════════════════
+const cv = document.getElementById('cv'), ctx = cv.getContext('2d');
+ctx.imageSmoothingEnabled = false;
+const statusEl = document.getElementById('status'), zoomEl = document.getElementById('zoom');
+const gridEl = document.getElementById('grid');
+let zoom = 1;
+let autoFit = true;   // 仅"适应窗口"模式下随窗口变化重算；手动缩放后不回弹
+
+function load(src) {
+  return new Promise((res, rej) => {
+    const im = new Image();
+    im.onload = () => res(im);
+    im.onerror = () => rej(new Error(src));
+    im.src = src;
+  });
+}
+
+function spriteSrcs(sp) {
+  return sp.frames ? sp.frames.flat() : [sp.src];
+}
+
+async function boot() {
+  const jobs = [
+    ...Object.entries(SCENE.tilesets).map(([ch, src]) => load(src).then(im => [ch, im])),
+    ...SCENE.sprites.flatMap(sp => spriteSrcs(sp).map(src => load(src).then(im => [src, im]))),
+  ];
+  const out = new Map();
+  let fail = 0, tileWarn = 0;
+  for (const j of jobs) {
+    try { const [k, im] = await j; out.set(k, im); }
+    catch (e) { fail++; statusEl.textContent = '加载失败: ' + e.message; statusEl.className = 'err'; }
+  }
+  // tileset 一律按 32×32 单帧处理：非 32×32 时按左上第一格裁剪并在状态栏提示（避免整图缩进一格）
+  for (const [ch, src] of Object.entries(SCENE.tilesets)) {
+    const im = out.get(ch);
+    if (im && (im.width !== 32 || im.height !== 32)) {
+      tileWarn++;
+      console.warn(`[scene-previewer] tileset '${ch}' 为 ${im.width}×${im.height}，按 32×32 单帧处理：取左上 ${Math.min(32, im.width)}×${Math.min(32, im.height)} 格。若为多格 sheet，请在 SCENE.tilesets 换成 32×32 单帧。`);
+    }
+  }
+  if (!fail) {
+    statusEl.textContent = `就绪：${SCENE.map[0].length}×${SCENE.map.length} 格 + ${SCENE.sprites.length} 个精灵（含帧动画）` +
+      (tileWarn ? `（${tileWarn} 个 tileset 非 32×32，取左上格）` : '');
+    statusEl.className = '';
+  }
+  return out;
+}
+
+let current = new Map();
+function draw(imgs, t) {
+  const { w, h } = SCENE.canvas;
+  ctx.clearRect(0, 0, w, h);
+  const T = 32;
+  SCENE.map.forEach((row, ry) => {
+    [...row].forEach((ch, rx) => {
+      const im = imgs.get(ch);
+      if (im) ctx.drawImage(im, 0, 0, Math.min(32, im.width), Math.min(32, im.height), rx * T, ry * T, T, T);
+    });
+  });
+  for (const sp of SCENE.sprites) {
+    const place = im => ctx.drawImage(im, Math.round(sp.x - im.width / 2), Math.round(sp.y - im.height));
+    if (sp.frames) {
+      const idx = Math.floor(t * (sp.fps || 8)) % sp.frames.length;
+      for (const src of sp.frames[idx]) {
+        const im = imgs.get(src);
+        if (im) place(im);
+      }
+    } else {
+      const im = imgs.get(sp.src);
+      if (im) place(im);
+    }
+  }
+  if (gridEl.checked) {
+    ctx.strokeStyle = 'rgba(165,236,246,0.18)';
+    ctx.lineWidth = 1;
+    for (let x = T; x < w; x += T) { ctx.beginPath(); ctx.moveTo(x + .5, 0); ctx.lineTo(x + .5, h); ctx.stroke(); }
+    for (let y = T; y < h; y += T) { ctx.beginPath(); ctx.moveTo(0, y + .5); ctx.lineTo(w, y + .5); ctx.stroke(); }
+  }
+}
+
+function setZoom(z, manual = true) {
+  zoom = Math.max(1, Math.min(8, Math.round(z)));
+  if (manual) autoFit = false;
+  cv.style.width = SCENE.canvas.w * zoom + 'px';
+  cv.style.height = SCENE.canvas.h * zoom + 'px';
+  zoomEl.textContent = zoom + '×';
+}
+function fit() {
+  // clientWidth/Height 已排除既有滚动条；再留少量余量，避免 fit 结果恰好溢出引发滚动条抖动
+  const z = Math.floor(Math.min(
+    (document.documentElement.clientWidth - 40) / SCENE.canvas.w,
+    (document.documentElement.clientHeight - 170) / SCENE.canvas.h));
+  autoFit = true;
+  setZoom(Math.max(1, z), false);
+}
+
+document.getElementById('plus').onclick = () => setZoom(zoom + 1);
+document.getElementById('minus').onclick = () => setZoom(zoom - 1);
+document.getElementById('fit').onclick = fit;
+addEventListener('keydown', e => {
+  if (e.key === '=' || e.key === '+') setZoom(zoom + 1);
+  if (e.key === '-') setZoom(zoom - 1);
+});
+addEventListener('wheel', e => {
+  if (!e.ctrlKey) return;
+  e.preventDefault();
+  setZoom(zoom + (e.deltaY < 0 ? 1 : -1));
+}, { passive: false });
+addEventListener('resize', () => { if (autoFit) fit(); });
+
+let t0 = 0;
+function loop(now) {
+  draw(current, (now - t0) / 1000);
+  requestAnimationFrame(loop);
+}
+
+boot().then(m => {
+  current = m;
+  fit();
+  t0 = performance.now();
+  requestAnimationFrame(loop);
+});
+</script>
+</body>
+</html>

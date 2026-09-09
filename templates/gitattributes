@@ -1,0 +1,7 @@
+# Auto detect text files and perform LF normalization
+* text=auto
+
+# 资产一律二进制：防换行归一化误伤（跨 Windows/macOS 同步）
+*.png binary
+*.gif binary
+*.aseprite binary

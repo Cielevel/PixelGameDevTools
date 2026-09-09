@@ -1,0 +1,16 @@
+{
+  "version": 1,
+  "name": "AI 图/放大稿 → 网格还原 + 量化（与 standardize 默认同口径）",
+  "input": {
+    "op": "source.images",
+    "params": { "paths": ["in/dog_src.png"], "fps": 10 }
+  },
+  "stages": [
+    { "op": "grid-sample", "params": { "grid": "auto", "sampling": "mode", "bg": "auto" } },
+    { "op": "quantize",    "params": { "colors": 16 } },
+    { "op": "export-frames" },
+    { "op": "export-sheet", "params": { "source-route": "sampled" } },
+    { "op": "gate-check",  "params": { "max-colors": 16 } }
+  ],
+  "output": { "dir": "out/dog_std/" }
+}

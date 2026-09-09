@@ -1,0 +1,564 @@
+{
+ "baseline:A": {
+  "t_s": 0.0,
+  "raw_size": [
+   32,
+   32
+  ],
+  "colors": 7,
+  "match": 12.7,
+  "match_tol": 100.0,
+  "match_off": [
+   0,
+   0
+  ],
+  "offpal": 0.0,
+  "bleed": 100.0,
+  "diff_px": 0,
+  "idem": true,
+  "detected": null
+ },
+ "baseline_only:A": {
+  "t_s": 0.0,
+  "raw_size": [
+   32,
+   32
+  ],
+  "colors": 7,
+  "match": 12.7,
+  "match_tol": 100.0,
+  "match_off": [
+   0,
+   0
+  ],
+  "offpal": 0.0,
+  "bleed": 100.0,
+  "diff_px": 0,
+  "idem": true,
+  "detected": null
+ },
+ "spritegrid:A": {
+  "t_s": 1.77,
+  "raw_size": [
+   32,
+   32
+  ],
+  "colors": 7,
+  "match": 12.7,
+  "match_tol": 100.0,
+  "match_off": [
+   0,
+   0
+  ],
+  "offpal": 0.0,
+  "bleed": 100.0,
+  "diff_px": 0,
+  "idem": true,
+  "detected": null
+ },
+ "spritegrid_q5:A": {
+  "t_s": 1.27,
+  "raw_size": [
+   32,
+   32
+  ],
+  "colors": 7,
+  "match": 1.2,
+  "match_tol": 100.0,
+  "match_off": [
+   0,
+   0
+  ],
+  "offpal": 0.0,
+  "bleed": 100.0,
+  "diff_px": 155,
+  "idem": false,
+  "detected": null
+ },
+ "spritegrid_q4:A": {
+  "t_s": 1.28,
+  "raw_size": [
+   32,
+   32
+  ],
+  "colors": 7,
+  "match": 1.2,
+  "match_tol": 10.7,
+  "match_off": [
+   0,
+   0
+  ],
+  "offpal": 89.3,
+  "bleed": 100.0,
+  "diff_px": 0,
+  "idem": true,
+  "detected": null
+ },
+ "ppa:A": {
+  "t_s": 1.38,
+  "raw_size": [
+   32,
+   32
+  ],
+  "colors": 7,
+  "match": 12.7,
+  "match_tol": 100.0,
+  "match_off": [
+   0,
+   0
+  ],
+  "offpal": 0.0,
+  "bleed": 100.0,
+  "diff_px": 241,
+  "idem": false,
+  "detected": null
+ },
+ "ppa_c8:A": {
+  "t_s": 0.31,
+  "raw_size": [
+   32,
+   32
+  ],
+  "colors": 7,
+  "match": 1.2,
+  "match_tol": 50.8,
+  "match_off": [
+   0,
+   0
+  ],
+  "offpal": 49.2,
+  "bleed": 100.0,
+  "diff_px": 241,
+  "idem": false,
+  "detected": null
+ },
+ "ppa_c16:A": {
+  "t_s": 0.31,
+  "raw_size": [
+   32,
+   32
+  ],
+  "colors": 7,
+  "match": 1.2,
+  "match_tol": 52.0,
+  "match_off": [
+   0,
+   0
+  ],
+  "offpal": 48.0,
+  "bleed": 100.0,
+  "diff_px": 241,
+  "idem": false,
+  "detected": null
+ },
+ "ppa_c32:A": {
+  "t_s": 0.32,
+  "raw_size": [
+   32,
+   32
+  ],
+  "colors": 7,
+  "match": 12.7,
+  "match_tol": 100.0,
+  "match_off": [
+   0,
+   0
+  ],
+  "offpal": 0.0,
+  "bleed": 100.0,
+  "diff_px": 241,
+  "idem": false,
+  "detected": null
+ },
+ "pixfix:A": {
+  "t_s": 0.64,
+  "raw_size": [
+   64,
+   64
+  ],
+  "colors": 7,
+  "match": 12.7,
+  "match_tol": 100.0,
+  "match_off": [
+   0,
+   0
+  ],
+  "offpal": 0.0,
+  "bleed": 100.0,
+  "diff_px": 393,
+  "idem": false,
+  "detected": [
+   64,
+   64,
+   16.0,
+   "high"
+  ]
+ },
+ "pixfix_c16:A": {
+  "t_s": 0.61,
+  "raw_size": [
+   64,
+   64
+  ],
+  "colors": 7,
+  "match": 12.7,
+  "match_tol": 100.0,
+  "match_off": [
+   0,
+   0
+  ],
+  "offpal": 0.0,
+  "bleed": 100.0,
+  "diff_px": 393,
+  "idem": false,
+  "detected": [
+   64,
+   64,
+   16.0,
+   "high"
+  ]
+ },
+ "pixfix_c32:A": {
+  "t_s": 1.06,
+  "raw_size": [
+   64,
+   64
+  ],
+  "colors": 7,
+  "match": 12.7,
+  "match_tol": 100.0,
+  "match_off": [
+   0,
+   0
+  ],
+  "offpal": 0.0,
+  "bleed": 100.0,
+  "diff_px": 393,
+  "idem": false,
+  "detected": [
+   64,
+   64,
+   16.0,
+   "high"
+  ]
+ },
+ "standardize:A": {
+  "t_s": 1.13,
+  "raw_size": [
+   32,
+   32
+  ],
+  "colors": 7,
+  "match": 12.7,
+  "match_tol": 100.0,
+  "match_off": [
+   0,
+   0
+  ],
+  "offpal": 0.0,
+  "bleed": 0.0,
+  "diff_px": 0,
+  "idem": true,
+  "detected": null
+ },
+ "standardize_c16:A": {
+  "t_s": 1.12,
+  "raw_size": [
+   32,
+   32
+  ],
+  "colors": 7,
+  "match": 12.7,
+  "match_tol": 100.0,
+  "match_off": [
+   0,
+   0
+  ],
+  "offpal": 0.0,
+  "bleed": 0.0,
+  "diff_px": 0,
+  "idem": true,
+  "detected": null
+ },
+ "baseline:B": {
+  "t_s": 0.0,
+  "raw_size": [
+   32,
+   32
+  ],
+  "colors": 7,
+  "match": 12.7,
+  "match_tol": 100.0,
+  "match_off": [
+   0,
+   0
+  ],
+  "offpal": 0.0,
+  "bleed": 100.0,
+  "diff_px": 0,
+  "idem": true,
+  "detected": null
+ },
+ "baseline_only:B": {
+  "t_s": 0.0,
+  "raw_size": [
+   32,
+   32
+  ],
+  "colors": 23,
+  "match": 11.5,
+  "match_tol": 100.0,
+  "match_off": [
+   0,
+   0
+  ],
+  "offpal": 0.0,
+  "bleed": 100.0,
+  "diff_px": 0,
+  "idem": true,
+  "detected": null
+ },
+ "spritegrid:B": {
+  "t_s": 1.44,
+  "raw_size": [
+   32,
+   32
+  ],
+  "colors": 22,
+  "match": 11.5,
+  "match_tol": 100.0,
+  "match_off": [
+   0,
+   0
+  ],
+  "offpal": 0.0,
+  "bleed": 100.0,
+  "diff_px": 290,
+  "idem": false,
+  "detected": null
+ },
+ "spritegrid_q5:B": {
+  "t_s": 1.27,
+  "raw_size": [
+   32,
+   32
+  ],
+  "colors": 8,
+  "match": 1.2,
+  "match_tol": 100.0,
+  "match_off": [
+   0,
+   0
+  ],
+  "offpal": 0.0,
+  "bleed": 100.0,
+  "diff_px": 203,
+  "idem": false,
+  "detected": null
+ },
+ "spritegrid_q4:B": {
+  "t_s": 1.29,
+  "raw_size": [
+   32,
+   32
+  ],
+  "colors": 9,
+  "match": 1.2,
+  "match_tol": 10.0,
+  "match_off": [
+   0,
+   0
+  ],
+  "offpal": 90.0,
+  "bleed": 100.0,
+  "diff_px": 206,
+  "idem": false,
+  "detected": null
+ },
+ "ppa:B": {
+  "t_s": 1.5,
+  "raw_size": [
+   32,
+   32
+  ],
+  "colors": 9,
+  "match": 11.9,
+  "match_tol": 100.0,
+  "match_off": [
+   0,
+   0
+  ],
+  "offpal": 0.0,
+  "bleed": 100.0,
+  "diff_px": 259,
+  "idem": false,
+  "detected": null
+ },
+ "ppa_c8:B": {
+  "t_s": 0.31,
+  "raw_size": [
+   32,
+   32
+  ],
+  "colors": 7,
+  "match": 1.2,
+  "match_tol": 1.2,
+  "match_off": [
+   0,
+   0
+  ],
+  "offpal": 98.8,
+  "bleed": 100.0,
+  "diff_px": 257,
+  "idem": false,
+  "detected": null
+ },
+ "ppa_c16:B": {
+  "t_s": 0.32,
+  "raw_size": [
+   32,
+   32
+  ],
+  "colors": 7,
+  "match": 1.2,
+  "match_tol": 1.2,
+  "match_off": [
+   0,
+   0
+  ],
+  "offpal": 98.8,
+  "bleed": 100.0,
+  "diff_px": 257,
+  "idem": false,
+  "detected": null
+ },
+ "ppa_c32:B": {
+  "t_s": 0.31,
+  "raw_size": [
+   32,
+   32
+  ],
+  "colors": 7,
+  "match": 1.2,
+  "match_tol": 24.2,
+  "match_off": [
+   0,
+   0
+  ],
+  "offpal": 75.8,
+  "bleed": 100.0,
+  "diff_px": 257,
+  "idem": false,
+  "detected": null
+ },
+ "pixfix:B": {
+  "t_s": 0.66,
+  "raw_size": [
+   64,
+   64
+  ],
+  "colors": 27,
+  "match": 3.8,
+  "match_tol": 100.0,
+  "match_off": [
+   0,
+   0
+  ],
+  "offpal": 0.0,
+  "bleed": 100.0,
+  "diff_px": 377,
+  "idem": false,
+  "detected": [
+   64,
+   64,
+   16.0,
+   "high"
+  ]
+ },
+ "pixfix_c16:B": {
+  "t_s": 0.6,
+  "raw_size": [
+   64,
+   64
+  ],
+  "colors": 27,
+  "match": 3.5,
+  "match_tol": 100.0,
+  "match_off": [
+   0,
+   0
+  ],
+  "offpal": 0.0,
+  "bleed": 100.0,
+  "diff_px": 323,
+  "idem": false,
+  "detected": [
+   64,
+   64,
+   16.0,
+   "high"
+  ]
+ },
+ "pixfix_c32:B": {
+  "t_s": 1.03,
+  "raw_size": [
+   64,
+   64
+  ],
+  "colors": 26,
+  "match": 1.2,
+  "match_tol": 100.0,
+  "match_off": [
+   0,
+   0
+  ],
+  "offpal": 0.0,
+  "bleed": 100.0,
+  "diff_px": 330,
+  "idem": false,
+  "detected": [
+   64,
+   64,
+   16.0,
+   "high"
+  ]
+ },
+ "standardize:B": {
+  "t_s": 1.13,
+  "raw_size": [
+   32,
+   32
+  ],
+  "colors": 12,
+  "match": 11.5,
+  "match_tol": 100.0,
+  "match_off": [
+   0,
+   0
+  ],
+  "offpal": 0.0,
+  "bleed": 0.0,
+  "diff_px": 0,
+  "idem": true,
+  "detected": null
+ },
+ "standardize_c16:B": {
+  "t_s": 1.13,
+  "raw_size": [
+   32,
+   32
+  ],
+  "colors": 12,
+  "match": 11.5,
+  "match_tol": 100.0,
+  "match_off": [
+   0,
+   0
+  ],
+  "offpal": 0.0,
+  "bleed": 0.0,
+  "diff_px": 0,
+  "idem": true,
+  "detected": null
+ }
+}

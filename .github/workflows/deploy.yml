@@ -1,0 +1,45 @@
+# 部署节点工作台到 GitHub Pages（静态托管，全客户端、无后端）
+# 本仓为公开仓，Pages 直接可用；私有 fork 需 GitHub Pro/Team 才能开 Pages
+name: Deploy Workbench
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: 安装依赖
+        run: npm install
+        working-directory: workbench
+      - name: 构建（Pyodide 自托管随 dist/ 发布）
+        run: npm run build
+        working-directory: workbench
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: workbench/dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

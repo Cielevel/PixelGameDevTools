@@ -1,0 +1,22 @@
+# macOS
+.DS_Store
+
+# Windows
+Thumbs.db
+desktop.ini
+
+# Python 运行产物与虚拟环境
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+
+# 管线配方示例/测试的默认输出目录（examples/*.pipeline.json 的 output.dir）
+out/
+
+# workbench 构建产物与自托管 Pyodide 运行时（npm run build/dev 时从 npm 包拷出）
+workbench/dist/
+workbench/public/pyodide/
+
+# Node 依赖（workbench/）
+node_modules/

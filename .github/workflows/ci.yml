@@ -1,0 +1,43 @@
+# CI —— 核心工具链回归：pytest（含管线双 parity）+ 前端 JS↔Python 口径对拍
+# ubuntu-latest 自带 ffmpeg（视频 parity 用例需要；缺失时该用例自动跳过）
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  toolkit-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: 安装依赖
+        run: pip install Pillow pytest
+      - name: pytest（pipeline / parity / 门禁）
+        run: python -m pytest pixel-toolkit/tests/ -q
+      - name: 前端口径对拍（需 node）
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: python pixel-toolkit/tools/parity_frontend.py
+
+  workbench:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: 安装依赖
+        run: npm install
+        working-directory: workbench
+      - name: 构建（含 Pyodide 自托管拷贝）
+        run: npm run build
+        working-directory: workbench
+      - name: Pyodide 执行链烟测（node）
+        run: npm run smoke
+        working-directory: workbench

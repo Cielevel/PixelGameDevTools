@@ -1,0 +1,24 @@
+{
+  "name": "pixel-workbench",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "像素管线节点工作台：React Flow 画布编辑配方 JSON，Pyodide 加载 pixel-toolkit 同一核心在浏览器执行（本地处理，素材不上传）",
+  "scripts": {
+    "prep": "node scripts/copy-pyodide.mjs",
+    "dev": "node scripts/copy-pyodide.mjs && vite",
+    "build": "node scripts/copy-pyodide.mjs && vite build",
+    "preview": "vite preview",
+    "smoke": "node scripts/smoke.mjs"
+  },
+  "dependencies": {
+    "@xyflow/react": "^12.11.6",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^5.1.0",
+    "pyodide": "314.0.6",
+    "vite": "^8.2.2"
+  }
+}
