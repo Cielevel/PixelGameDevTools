@@ -135,6 +135,12 @@ export default function App() {
 
   const onRun = useCallback(async () => {
     if (bootState !== "ready" || running) return;
+    // 输入未就绪的友好提示（先于后端校验，直接告诉用户去哪点）
+    const src = nodesRef.current.find((n) => n.data.isSource);
+    if (src?.data.op === "source.images" && !src.data.params?.paths?.length) {
+      setLogs(["✗ 还没有输入图像——点上方「📁 选择输入图像」按钮，或画布源节点上的「选择图像 / 帧序列…」"]);
+      return;
+    }
     setRunning(true);
     setLogs([]);
     setFiles([]);
@@ -197,6 +203,10 @@ export default function App() {
   }, [setNodes, setEdges]);
 
   const selectedNode = nodes.find((n) => n.id === selectedId) || null;
+  const nInputs = (() => {
+    const src = nodes.find((n) => n.data.isSource);
+    return src?.data.params?.paths?.length || 0;
+  })();
 
   return (
     <div className="app">
@@ -209,6 +219,16 @@ export default function App() {
           <span className={"chip " + bootState}>
             {bootState === "ready" ? "Pyodide 就绪" : bootLog}
           </span>
+          <label className={"pick-btn" + (nInputs ? " has-files" : "")}>
+            <input
+              type="file"
+              accept="image/png,image/jpeg,image/webp"
+              multiple
+              hidden
+              onChange={(e) => onPickFiles(e.target.files)}
+            />
+            {nInputs ? `📁 输入图像 ×${nInputs}` : "📁 选择输入图像"}
+          </label>
           <button className="primary" disabled={bootState !== "ready" || running} onClick={onRun}>
             {running ? "运行中…" : "▶ 运行"}
           </button>

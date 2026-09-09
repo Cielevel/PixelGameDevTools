@@ -30,8 +30,15 @@ header h1 .sub { font-size: 11px; color: var(--dim); font-weight: normal; }
   border-radius: 6px; padding: 5px 12px; cursor: pointer; font-size: 12px;
 }
 .toolbar button:hover:not(:disabled) { border-color: var(--accent); }
-.toolbar button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
 .toolbar button:disabled { opacity: 0.45; cursor: default; }
+.toolbar .pick-btn {
+  display: inline-flex; align-items: center; gap: 4px; cursor: pointer;
+  background: var(--panel2); color: var(--fg); border: 1px solid var(--accent);
+  border-radius: 6px; padding: 5px 12px; font-size: 12px;
+}
+.toolbar .pick-btn:hover { background: var(--bg); }
+.toolbar .pick-btn.has-files { background: #3faa6b33; border-color: #3faa6b; }
+.toolbar button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
 .chip { font-size: 11px; color: var(--dim); padding: 3px 8px; border: 1px solid var(--line); border-radius: 10px; }
 .chip.ready { color: #3faa6b; border-color: #3faa6b55; }
 .chip.error { color: #c9564a; border-color: #c9564a55; }
